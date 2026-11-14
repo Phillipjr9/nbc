@@ -18,6 +18,7 @@ import {
   type AuthState,
 } from "../lib/supabaseAuth";
 import { isSupabaseConfigured } from "../lib/supabase";
+import { fetchProfiles } from "../lib/profileSync";
 
 type LoginPageProps = {
   portal?: LoginPortal;
@@ -151,17 +152,40 @@ export function LoginPage({
       }
     }
 
-    // Fall back to local authentication if Supabase is not configured or failed
+    // Fall back to local authentication using profiles table data
+    // This is needed because GoTrue rejects SQL-created users
     const matchedCustom = customProfiles.find((p) => normalizeCredentialInput(p.email).toLowerCase() === cleanEmail);
     if (matchedCustom) {
       const storedPassword = normalizeCredentialInput(matchedCustom.password ?? "");
-      if (storedPassword !== pass) {
-        setError("The password entered does not match our records.");
+      if (storedPassword === pass) {
+        setPendingProfile(matchedCustom);
+        setStep("pin");
         return;
       }
-      setPendingProfile(matchedCustom);
-      setStep("pin");
+      setError("The password entered does not match our records.");
       return;
+    }
+
+    // If custom profiles are empty (first visit), try to fetch them from Supabase REST API
+    if (customProfiles.length === 0 && isSupabaseConfigured) {
+      try {
+        const remoteProfiles = await fetchProfiles();
+        if (remoteProfiles.length > 0) {
+          const fetchedMatch = remoteProfiles.find((p) => normalizeCredentialInput(p.email).toLowerCase() === cleanEmail);
+          if (fetchedMatch) {
+            const storedPassword = normalizeCredentialInput(fetchedMatch.password ?? "");
+            if (storedPassword === pass) {
+              setPendingProfile(fetchedMatch);
+              setStep("pin");
+              return;
+            }
+            setError("The password entered does not match our records.");
+            return;
+          }
+        }
+      } catch (fetchError) {
+        console.warn("Profile sync failed during login fallback:", fetchError);
+      }
     }
 
     const builtIns: { persona: "personal" | "business" | "wealth"; password: string; pin: string }[] = [
