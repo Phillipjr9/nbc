@@ -851,6 +851,7 @@ export function SignupPage({ initialSegment = "personal", onNavigate, onCreatePr
         { id: `rec-1-${suffix}`, name: "Alex Tremblay", email: "alex.tremblay@example.ca", bank: "Interac e-Transfer®" },
       ],
       cards,
+      pendingCards: [],
       goals: [
         {
           id: `goal-1-${suffix}`,

@@ -75,6 +75,8 @@ export type Recipient = {
   bank: string;
 };
 
+export type CardDeliveryStatus = "ordered" | "shipped" | "delivered" | "cancelled";
+
 export type BankCard = {
   id: string;
   label: string;
@@ -86,6 +88,9 @@ export type BankCard = {
   cardholderName?: string;
   billingAddress?: string;
   monthlyLimit?: number;
+  atmLimit?: number;
+  posLimit?: number;
+  onlineLimit?: number;
   linkedAccountId: string;
   locked: boolean;
   liked?: boolean;
@@ -97,6 +102,21 @@ export type BankCard = {
   rewardsPoints?: number;
   cashbackRate?: string;
   accent: "allure" | "world-elite" | "debit" | "business";
+  pin?: string;
+  pinUpdatedAt?: string;
+  replacementCardId?: string;
+  previousCardId?: string;
+  deliveryStatus?: CardDeliveryStatus;
+  deliveredAt?: string;
+  lostReportedAt?: string;
+  disputedTxIds?: string[];
+};
+
+export type PendingCard = {
+  approvalRequestId: string;
+  card: BankCard;
+  requestedAt: string;
+  requestedBy: string;
 };
 
 export function normalizeBankCardList(cards?: BankCard[] | null): BankCard[] {
@@ -148,6 +168,29 @@ export const TRANSFER_FAILURE_REASONS = [
   "Business account transfer restriction",
   "User transfer paused by administration",
   "Technical processing error",
+  "Other",
+] as const;
+
+export const REVERSAL_REASONS = [
+  "Duplicate transfer",
+  "Transfer sent to wrong account",
+  "Beneficiary details incorrect",
+  "Amount entered incorrectly",
+  "Fraudulent or unauthorized transfer",
+  "Transfer completed before approval",
+  "Customer requested cancellation",
+  "Compliance or AML concern",
+  "Account closed or restricted",
+  "Technical processing error",
+  "Transfer exceeded limits",
+  "Unauthorized by account holder",
+  "Administrative error",
+  "Transfer suspended by regulation",
+  "Duplicate payment detected",
+  "Wrong reference or remittance data",
+  "Beneficiary rejected the deposit",
+  "Currency conversion error",
+  "Bank error or system failure",
   "Other",
 ] as const;
 
@@ -294,6 +337,7 @@ export type BankUserProfile = {
   payees: Payee[];
   recipients: Recipient[];
   cards: BankCard[];
+  pendingCards: PendingCard[];
   goals: SavingsGoal[];
   payrollRoster?: EmployeePayrollItem[];
   invoices?: BusinessInvoice[];
@@ -503,6 +547,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         id: "card-allure",
         label: "Allure® Mastercard®",
         network: "Mastercard",
+        number: "5412 8824 6190 4829",
         last4: "4829",
         expiry: "09/29",
         cvv: "418",
@@ -518,11 +563,18 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         accent: "allure",
         status: "active",
         issuedAt: "2024-09-12",
+        pin: "7935",
+        atmLimit: 500,
+        posLimit: 2000,
+        onlineLimit: 3000,
+        deliveryStatus: "delivered",
+        deliveredAt: "2024-09-15",
       },
       {
         id: "card-debit",
         label: "National Bank Debit Mastercard",
         network: "Debit",
+        number: "5191 4028 7315 1904",
         last4: "1904",
         expiry: "04/28",
         cvv: "207",
@@ -536,8 +588,15 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         accent: "debit",
         status: "active",
         issuedAt: "2023-04-02",
+        pin: "7935",
+        atmLimit: 300,
+        posLimit: 1000,
+        onlineLimit: 2000,
+        deliveryStatus: "delivered",
+        deliveredAt: "2023-04-05",
       },
     ],
+    pendingCards: [],
     goals: [
       {
         id: "goal-1",
@@ -707,6 +766,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         id: "card-biz",
         label: "Business Platinum Mastercard®",
         network: "Mastercard",
+        number: "5524 6610 8094 7710",
         last4: "7710",
         expiry: "11/28",
         cvv: "842",
@@ -722,11 +782,18 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         accent: "business",
         status: "active",
         issuedAt: "2024-02-19",
+        pin: "2486",
+        atmLimit: 1000,
+        posLimit: 5000,
+        onlineLimit: 10000,
+        deliveryStatus: "delivered",
+        deliveredAt: "2024-02-22",
       },
       {
         id: "card-biz-ops",
         label: "Corporate Fleet & Operations Card",
         network: "Mastercard",
+        number: "5458 9210 3418 3398",
         last4: "3398",
         expiry: "08/29",
         cvv: "519",
@@ -740,8 +807,17 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         rewardsPoints: 18900,
         cashbackRate: "1.5 pts per $1 · Operations cap $15k",
         accent: "world-elite",
+        status: "active",
+        issuedAt: "2024-05-10",
+        pin: "2486",
+        atmLimit: 500,
+        posLimit: 2000,
+        onlineLimit: 5000,
+        deliveryStatus: "shipped",
+        deliveredAt: undefined,
       },
     ],
+    pendingCards: [],
     goals: [
       {
         id: "bgoal-1",
@@ -877,6 +953,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         id: "card-we",
         label: "World Elite® Mastercard®",
         network: "Mastercard",
+        number: "5458 9210 3418 9012",
         last4: "9012",
         expiry: "06/29",
         linkedAccountId: "w-crd",
@@ -889,8 +966,15 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         accent: "world-elite",
         status: "active",
         issuedAt: "2023-06-30",
+        pin: "6194",
+        atmLimit: 1000,
+        posLimit: 5000,
+        onlineLimit: 10000,
+        deliveryStatus: "delivered",
+        deliveredAt: "2023-07-03",
       },
     ],
+    pendingCards: [],
     goals: [
       {
         id: "wgoal-1",

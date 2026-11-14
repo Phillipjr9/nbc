@@ -2,18 +2,49 @@ import { useMemo, useState } from "react";
 import {
   AdminOps,
   AdminPanelProps,
+  applyCardApprovalDecision,
   can,
+  checkCardExpiry,
+  generateCardNumber,
   parseBackup,
   CARD_TEMPLATES,
   downloadFile,
   newId,
   randomDigits,
-  round2,
   todayIso,
 } from "../../banking/adminOps";
-import { BankCard, GlobalBankConfig, formatMoney } from "../../banking/bankingTypes";
+import { CardDeliveryStatus, GlobalBankConfig, PendingCard, formatMoney } from "../../banking/bankingTypes";
 import BankCardVisual from "../BankCardVisual";
 import { Field, inputCls } from "./AdminClients";
+
+function deliveryBadge(status: CardDeliveryStatus | undefined): string {
+  if (!status) return "Unknown";
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function ApprovalPend({ pendingCard, onApprove, onReject }: {
+  pendingCard: PendingCard;
+  onApprove: (pc: PendingCard) => void;
+  onReject: (pc: PendingCard) => void;
+}) {
+  return (
+    <div className="rounded-[6px] border-2 border-dashed border-amber-300 bg-amber-50/60 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-bold uppercase text-amber-800">Awaiting approval</p>
+        <span className="text-[10px] font-mono text-amber-700">{pendingCard.approvalRequestId}</span>
+      </div>
+      <p className="mt-1 text-[12px] font-semibold text-nbc-navy">{pendingCard.card.label}</p>
+      <p className="text-[11px] text-[#565656]">
+        {pendingCard.card.number ? pendingCard.card.number.replace(/(.{4})/g, "$1 ").trim() : `•••• ${pendingCard.card.last4}`}
+      </p>
+      <p className="text-[11px] text-[#565656]">{pendingCard.card.cardholderName}</p>
+      <div className="mt-2 flex gap-1.5">
+        <button type="button" onClick={() => onApprove(pendingCard)} className="rounded-full bg-[#017a33] py-1 text-[11px] font-semibold text-white hover:bg-[#015c27]">Approve</button>
+        <button type="button" onClick={() => onReject(pendingCard)} className="rounded-full bg-rose-100 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-200">Reject</button>
+      </div>
+    </div>
+  );
+}
 
 export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
   const [targetKey, setTargetKey] = useState(selectedKey);
@@ -26,7 +57,18 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
   const [billingAddress, setBillingAddress] = useState(entry?.profile.address ?? "");
   const [points, setPoints] = useState(String(CARD_TEMPLATES[0].points));
   const [filterKey, setFilterKey] = useState("all");
+  const [expiryResult, setExpiryResult] = useState<{ name: string; cardLabel: string; last4: string; expiry: string }[] | null>(null);
 
+  // Collect pending cards from all users
+  const pendingCards = useMemo(
+    () =>
+      ops.users.flatMap((u) =>
+        (u.profile.pendingCards ?? []).map((pc) => ({ userKey: u.key, pendingCard: pc }))
+      ),
+    [ops.users]
+  );
+
+  // Collect issued cards from all users
   const issued = useMemo(
     () =>
       ops.users.flatMap((u) =>
@@ -35,35 +77,87 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
     [ops.users, filterKey]
   );
 
+  const approvePending = (pendingCard: PendingCard) => {
+    const targetKey = pendingCard.card.linkedAccountId;
+    ops.onRequestApproval({
+      requestedBy: ops.identity?.name ?? "Administration",
+      action: "card.issue",
+      label: `Approve card ${pendingCard.card.label}`,
+      detail: `Approve ${pendingCard.card.label} ${pendingCard.card.number?.replace(/\s/g, "") ?? pendingCard.card.last4}`,
+      targetKey: targetKey,
+      payload: { pendingCards: [(pendingCard)] },
+    });
+    // Directly apply for instant effect (admin is the decider)
+    ops.onUpdateUser(targetKey, (prev) => applyCardApprovalDecision(prev, pendingCard, "approved", ops.identity?.name ?? "Administration"), "CARD_APPROVED", `Card ${pendingCard.card.label} approved`);
+    ops.notify(`Card ${pendingCard.card.label} approved and issued.`);
+  };
+
+  const rejectPending = (pendingCard: PendingCard) => {
+    const targetKey = pendingCard.card.linkedAccountId;
+    ops.onUpdateUser(targetKey, (prev) => {
+      const remaining = prev.pendingCards?.filter((pc) => pc.approvalRequestId !== pendingCard.approvalRequestId) ?? [];
+      return { ...prev, pendingCards: remaining };
+    }, "CARD_REJECTED", `Card ${pendingCard.card.label} rejected`);
+    ops.notify(`Card ${pendingCard.card.label} rejected.`);
+  };
+
   const issue = (e: React.FormEvent) => {
     e.preventDefault();
     if (!entry) return;
     const template = CARD_TEMPLATES[templateIdx];
-    const linked =
-      entry.profile.accounts.find((a) => a.category === "credit") ?? entry.profile.accounts[0];
+    const linked = entry.profile.accounts.find((a) => a.category === "credit") ?? entry.profile.accounts[0];
     const fullCardNumber = cardNumber.replace(/\D/g, "").slice(0, 19);
     const normalizedLast4 = fullCardNumber.slice(-4) || randomDigits(4);
-    const card: BankCard = {
-      id: newId("card"),
-      label: label.trim() || template.label,
-      network: template.network,
-      number: fullCardNumber,
-      last4: normalizedLast4,
-      expiry: cardExpiry || "05/30",
-      cvv: cardCvv || randomDigits(3),
-      cardholderName: entry.profile.fullName.toUpperCase().slice(0, 28),
-      billingAddress: billingAddress.trim() || entry.profile.address || "Not provided",
-      linkedAccountId: linked?.id ?? "",
-      locked: false,
-      contactless: true,
-      international: true,
-      onlinePurchases: true,
-      rewardsPoints: Math.max(0, Math.round(Number(points) || 0)),
-      cashbackRate: template.perks,
-      accent: template.accent,
+    const pendingCard: PendingCard = {
+      approvalRequestId: `CARDPEND-${randomDigits(8)}`,
+      card: {
+        id: newId("card-pend"),
+        label: label.trim() || template.label,
+        network: template.network,
+        number: fullCardNumber || generateCardNumber(template.accent),
+        last4: normalizedLast4,
+        expiry: cardExpiry || "05/30",
+        cvv: cardCvv || randomDigits(3),
+        cardholderName: entry.profile.fullName.toUpperCase().slice(0, 28),
+        billingAddress: billingAddress.trim() || entry.profile.address || "Not provided",
+        linkedAccountId: linked?.id ?? "",
+        locked: false,
+        contactless: true,
+        international: true,
+        onlinePurchases: true,
+        rewardsPoints: Math.max(0, Math.round(Number(points) || 0)),
+        cashbackRate: template.perks,
+        accent: template.accent,
+        deliveryStatus: "ordered",
+      },
+      requestedAt: todayIso(),
+      requestedBy: ops.identity?.name ?? "Administration",
     };
-    ops.onUpdateUser(entry.key, (prev) => ({ ...prev, cards: [card, ...prev.cards] }), "CARD_ISSUED", `Issued ${card.label} •••• ${card.last4} to ${entry.profile.fullName}`);
-    ops.notify(`New ${card.label} issued to ${entry.profile.fullName}.`);
+    // Store in profile pendingCards
+    ops.onUpdateUser(entry.key, (prev) => ({
+      ...prev,
+      pendingCards: [...(prev.pendingCards ?? []), pendingCard],
+    }), "CARD_PENDING", `Card ${pendingCard.card.label} submitted for approval`);
+    // Also submit via approval queue
+    ops.onRequestApproval({
+      requestedBy: ops.identity?.name ?? "Administration",
+      action: "card.issue",
+      label: `Issue ${pendingCard.card.label} to ${entry.profile.fullName}`,
+      detail: `${pendingCard.card.label} •••• ${pendingCard.card.last4} — limit ${formatMoney(pendingCard.card.monthlyLimit ?? 0)}`,
+      targetKey: entry.key,
+      payload: { pendingCards: [pendingCard] },
+    });
+    ops.notify(`${pendingCard.card.label} submitted for approval.`);
+  };
+
+  const runExpiryCheck = () => {
+    const result = checkCardExpiry(ops.users);
+    setExpiryResult(result);
+    if (result.length > 0) {
+      ops.notify(`${result.length} card(s) expiring within 60 days.`);
+    } else {
+      ops.notify("No cards expiring within 60 days.");
+    }
   };
 
   return (
@@ -71,10 +165,24 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
       <div>
         <h2 className="text-[22px] font-bold text-nbc-navy sm:text-[24px]">Card management</h2>
         <p className="mt-0.5 text-[13.5px] text-[#565656]">
-          Issue cards, grant rewards points, freeze or revoke.
+          Issue cards (pending approval), grant rewards points, freeze or revoke.
         </p>
       </div>
 
+      {/* Expiry check bar */}
+      <div className="flex flex-wrap items-center gap-2 rounded-[6px] border border-[#e5e2da] bg-white p-3">
+        <button type="button" onClick={runExpiryCheck} className="rounded-full bg-nbc-navy px-3.5 py-1.5 text-[12.5px] font-semibold text-white hover:bg-[#105797]">
+          Check expiring cards
+        </button>
+        {expiryResult && expiryResult.length > 0 && (
+          <span className="text-[12px] text-[#8a6d3b]">
+            {expiryResult.length} card(s) expiring within 60 days:
+            {expiryResult.map((r) => ` ${r.cardLabel} ${r.last4} (${r.expiry})`).join("")}
+          </span>
+        )}
+      </div>
+
+      {/* Issue card form */}
       <form onSubmit={issue} className="grid gap-3 rounded-[6px] border border-[#e5e2da] bg-white p-4 sm:grid-cols-2 lg:grid-cols-6">
         <Field label="Client">
           <select className={inputCls} value={entry?.key ?? ""} onChange={(e) => { setTargetKey(e.target.value); onSelectKey(e.target.value); }}>
@@ -106,10 +214,28 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
         <Field label="Billing address"><input className={inputCls} value={billingAddress ?? ""} onChange={(e) => setBillingAddress(e.target.value)} placeholder="1200 Rue Sainte-Catherine" /></Field>
         <Field label="Opening points"><input className={inputCls} type="number" min="0" value={points} onChange={(e) => setPoints(e.target.value)} /></Field>
         <div className="flex items-end">
-          <button type="submit" className="w-full rounded-[6px] bg-nbc-red py-2.5 text-[13px] font-semibold text-white hover:bg-nbc-red-dark">Issue card</button>
+          <button type="submit" className="w-full rounded-[6px] bg-nbc-red py-2.5 text-[13px] font-semibold text-white hover:bg-nbc-red-dark">Issue card (pending approval)</button>
         </div>
       </form>
 
+      {/* Pending approvals */}
+      {pendingCards.length > 0 && (
+        <div className="rounded-[6px] border border-amber-300 bg-amber-50/40 p-4">
+          <h3 className="text-[14px] font-bold uppercase tracking-wide text-amber-800">Pending card approvals ({pendingCards.length})</h3>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {pendingCards.map(({ pendingCard }) => (
+              <ApprovalPend
+                key={pendingCard.approvalRequestId}
+                pendingCard={pendingCard}
+                onApprove={approvePending}
+                onReject={rejectPending}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Filter */}
       <div className="flex flex-wrap items-center gap-2">
         <select className={`${inputCls} max-w-[260px]`} value={filterKey} onChange={(e) => setFilterKey(e.target.value)}>
           <option value="all">All cards ({issued.length})</option>
@@ -122,6 +248,7 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
         </span>
       </div>
 
+      {/* Cards grid */}
       <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
         {issued.map(({ userKey, holder, card }) => {
           const user = ops.users.find((u) => u.key === userKey);
@@ -138,11 +265,21 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
                 </span>
               </div>
               <BankCardVisual card={card} holderName={holder} compact />
+              {/* Delivery status */}
+              {card.deliveryStatus && (
+                <div className="mt-2 flex items-center gap-2 text-[11px]">
+                  <span className="rounded-full bg-[#f4f1ea] px-2 py-0.5 text-[#565656]">
+                    Delivery: {deliveryBadge(card.deliveryStatus)}
+                  </span>
+                  {card.deliveredAt && <span className="text-[#777]">· Delivered {card.deliveredAt}</span>}
+                </div>
+              )}
               <div className="mt-3 space-y-1.5 text-[11.5px] text-[#565656]">
                 <p><strong className="text-[#121212]">Card number:</strong> {card.number ? card.number.replace(/(.{4})/g, "$1 ").trim() : `•••• •••• •••• ${card.last4}`}</p>
                 <p><strong className="text-[#121212]">Expiry:</strong> {card.expiry}</p>
                 <p><strong className="text-[#121212]">CVV:</strong> {card.cvv ?? "—"}</p>
                 <p><strong className="text-[#121212]">Billing address:</strong> {card.billingAddress || "—"}</p>
+                {card.deliveryStatus && <p><strong className="text-[#121212]">Delivery:</strong> {deliveryBadge(card.deliveryStatus)}{card.deliveredAt ? ` (${card.deliveredAt})` : ""}</p>}
               </div>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 <button

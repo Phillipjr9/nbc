@@ -5,6 +5,7 @@ import {
   BankUserProfile,
   Payee,
   Recipient,
+  PendingCard,
   SavingsGoal,
   Transaction,
 } from "../banking/bankingTypes";
@@ -155,6 +156,9 @@ export type ApprovalActionType =
   | "account.close"
   | "transaction.post"
   | "card.issue"
+  | "card.replace"
+  | "card.pin.change"
+  | "card.lost"
   | "config.publish"
   | "client.delete";
 
@@ -440,6 +444,19 @@ export const CARD_TEMPLATES: CardTemplate[] = [
   },
 ];
 
+const CARD_BIN_PREFIX: Record<BankCard["accent"], string> = {
+  allure: "541288246190",
+  "world-elite": "545892103418",
+  business: "552466108094",
+  debit: "519140287315",
+};
+
+export const generateCardNumber = (accent: BankCard["accent"]): string => {
+  const prefix = CARD_BIN_PREFIX[accent] ?? "0000000000000000";
+  const suffix = randomDigits(16 - prefix.length);
+  return `${prefix.slice(0, 4)} ${prefix.slice(4, 8)} ${prefix.slice(8, 12)} ${prefix.slice(12, 16)} ${suffix}`;
+};
+
 export const round2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 export const newId = (prefix: string) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
 export const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -452,6 +469,19 @@ export const nowStamp = () =>
     minute: "2-digit",
     hour12: true,
   });
+
+export const lostStamp = () =>
+  new Date().toLocaleString("en-CA", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+export const pinStamp = () =>
+  new Date().toISOString().slice(0, 10);
 
 export const randomDigits = (count: number) =>
   Array.from({ length: count }, () => Math.floor(Math.random() * 10)).join("");
@@ -532,6 +562,7 @@ export function buildManagedProfile(input: NewClientInput): BankUserProfile {
       id: newId("card"),
       label: input.card.label,
       network: input.card.network,
+      number: generateCardNumber(input.card.accent),
       last4: randomDigits(4),
       expiry: "05/30",
       cvv: randomDigits(3),
@@ -613,6 +644,7 @@ export function buildManagedProfile(input: NewClientInput): BankUserProfile {
     payees,
     recipients,
     cards,
+    pendingCards: [],
     goals,
     payrollRoster: isBiz
       ? [
@@ -937,5 +969,197 @@ export function applyGeneratedSeries(
     ...profile,
     accounts,
     transactions: [...stamped, ...profile.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)),
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Card operations: approval queue, replacement, PIN, freeze, disputes
+ * ------------------------------------------------------------------ */
+
+export type CardApprovalPayload = {
+  label: string;
+  network: BankCard["network"];
+  accent: BankCard["accent"];
+  monthlyLimit: number;
+  points: number;
+  perks: string;
+  cardholderName: string;
+  linkedAccountId: string;
+  pendingCards: PendingCard[];
+};
+
+export function submitCardForApproval(
+  profile: BankUserProfile,
+  input: CardApprovalPayload,
+  actor: string
+): { profile: BankUserProfile; approvalRequestId: string } {
+  const reqId = `CARDPEND-${randomDigits(8)}`;
+  const pendingCard: PendingCard = {
+    approvalRequestId: reqId,
+    card: {
+      id: newId("card-pend"),
+      label: input.label,
+      network: input.network,
+      number: generateCardNumber(input.accent),
+      last4: randomDigits(4),
+      expiry: "05/30",
+      cvv: randomDigits(3),
+      cardholderName: input.cardholderName,
+      monthlyLimit: input.monthlyLimit,
+      linkedAccountId: input.linkedAccountId,
+      locked: false,
+      contactless: true,
+      international: true,
+      onlinePurchases: true,
+      rewardsPoints: input.points,
+      cashbackRate: input.perks,
+      accent: input.accent,
+      deliveryStatus: "ordered",
+    },
+    requestedAt: todayIso(),
+    requestedBy: actor,
+  };
+  const updatedProfile = { ...profile, pendingCards: [...(profile.pendingCards ?? []), pendingCard] };
+  return {
+    profile: updatedProfile,
+    approvalRequestId: reqId,
+  };
+}
+
+export function applyCardApprovalDecision(
+  profile: BankUserProfile,
+  pendingCard: PendingCard,
+  decision: "approved" | "rejected",
+  actor: string
+): BankUserProfile {
+  if (decision === "rejected") {
+    return {
+      ...profile,
+      notes: [profile.notes ?? "", `Card ${pendingCard.card.label} (${pendingCard.card.last4}) rejected by ${actor}`].filter(Boolean).join("\n"),
+    };
+  }
+  const card = pendingCard.card;
+  return {
+    ...profile,
+    cards: [...profile.cards, card],
+    notes: [profile.notes ?? "", `Card ${card.label} (${card.last4}) issued by ${actor}`].filter(Boolean).join("\n"),
+  };
+}
+
+export function generateCardReplacement(
+  profile: BankUserProfile,
+  originalCardId: string,
+  _actor: string
+): BankUserProfile {
+  const original = profile.cards.find((c) => c.id === originalCardId);
+  if (!original) return profile;
+  const replacement: BankCard = {
+    ...original,
+    id: newId("card"),
+    number: generateCardNumber(original.accent),
+    last4: randomDigits(4),
+    cvv: randomDigits(3),
+    expiry: "05/30",
+    locked: false,
+    status: "active",
+    deliveryStatus: "ordered",
+    issuedAt: todayIso(),
+    previousCardId: original.id,
+  };
+  return {
+    ...profile,
+    cards: profile.cards.map((c) =>
+      c.id === originalCardId
+        ? { ...c, status: "cancelled" as const, locked: true, lostReportedAt: lostStamp() }
+        : c
+    ).concat(replacement),
+  };
+}
+
+export function changeCardPin(
+  profile: BankUserProfile,
+  cardId: string,
+  currentPin: string,
+  newPin: string,
+  _actor: string
+): BankUserProfile {
+  const target = profile.cards.find((c) => c.id === cardId);
+  if (!target) return profile;
+  const normalizedCurrent = currentPin.replace(/\D/g, "");
+  const normalizedNew = newPin.replace(/\D/g, "");
+  if (normalizedCurrent !== (target.pin ?? "0000")) {
+    throw new Error("Incorrect current PIN");
+  }
+  if (!/^\d{4}$/.test(normalizedNew)) {
+    throw new Error("New PIN must be exactly 4 digits");
+  }
+  return {
+    ...profile,
+    cards: profile.cards.map((c) =>
+      c.id === cardId
+        ? { ...c, pin: normalizedNew, pinUpdatedAt: pinStamp() }
+        : c
+    ),
+  };
+}
+
+export function checkCardExpiry(users: ManagedUserEntry[]): { key: string; name: string; cardLabel: string; last4: string; expiry: string }[] {
+  const out: { key: string; name: string; cardLabel: string; last4: string; expiry: string }[] = [];
+  const now = Date.now();
+  for (const u of users) {
+    for (const card of u.profile.cards) {
+      if (!card.expiry) continue;
+      const [expMonth, expYear] = card.expiry.split("/").map(Number);
+      const expDate = new Date(expYear, expMonth);
+      const daysUntilExpiry = Math.floor((expDate.getTime() - now) / 86400000);
+      if (daysUntilExpiry > 0 && daysUntilExpiry <= 60) {
+        out.push({ key: u.key, name: u.profile.fullName, cardLabel: card.label, last4: card.last4, expiry: card.expiry });
+      }
+    }
+  }
+  return out;
+}
+
+export function freezeCard(profile: BankUserProfile, cardId: string, _actor: string): BankUserProfile {
+  return {
+    ...profile,
+    cards: profile.cards.map((c) =>
+      c.id === cardId ? { ...c, locked: true } : c
+    ),
+  };
+}
+
+export function thawCard(profile: BankUserProfile, cardId: string, _actor: string): BankUserProfile {
+  return {
+    ...profile,
+    cards: profile.cards.map((c) =>
+      c.id === cardId ? { ...c, locked: false } : c
+    ),
+  };
+}
+
+export function reportCardLost(profile: BankUserProfile, cardId: string, _reason: string, _actor: string): BankUserProfile {
+  return {
+    ...profile,
+    cards: profile.cards.map((c) =>
+      c.id === cardId
+        ? { ...c, locked: true, status: "cancelled" as const, lostReportedAt: lostStamp() }
+        : c
+    ),
+  };
+}
+
+export function addCardDispute(profile: BankUserProfile, cardId: string, txId: string, _reason: string, _actor: string): BankUserProfile {
+  const card = profile.cards.find((c) => c.id === cardId);
+  if (!card) return profile;
+  const existing = card.disputedTxIds ?? [];
+  if (existing.includes(txId)) return profile;
+  return {
+    ...profile,
+    cards: profile.cards.map((c) =>
+      c.id === cardId
+        ? { ...c, disputedTxIds: [...existing, txId] }
+        : c
+    ),
   };
 }
