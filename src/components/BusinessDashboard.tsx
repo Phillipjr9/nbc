@@ -333,192 +333,29 @@ export default function BusinessDashboard({
       })
       .join("");
 
-    const win = window.open("", "_blank", "width=1200,height=1400");
-    if (!win) return;
+    const documentMarkup = `<!doctype html><html lang="en"><head><meta charset="UTF-8" /><title>${subjectAccount ? `${subjectAccount.name} account statement` : "Commercial account statement"}</title><style>@page { size: A4; margin: 12mm; } * { box-sizing: border-box; } body { margin: 0; background: #f3f1ee; color: #121212; font-family: Arial, Helvetica, sans-serif; } .statement-page { width: 210mm; min-height: 297mm; margin: 0 auto 12mm; padding: 12mm 14mm 12mm; background: #ffffff; box-shadow: 0 1px 8px rgba(0,0,0,0.08); page-break-after: always; } .statement-page:last-child { page-break-after: auto; margin-bottom: 0; } .statement-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 2px solid #ece7df; padding-bottom: 12px; margin-bottom: 18px; } .brand-wrap { display: flex; align-items: center; gap: 12px; } .brand-logo { width: 150px; height: auto; } .brand-mark-wrap { display: inline-flex; width: 34px; height: 34px; border-radius: 50%; background: #f6f3ee; padding: 6px; align-items: center; justify-content: center; } .brand-mark { width: 100%; height: 100%; } .header-meta { text-align: right; } .eyebrow { display: block; color: #6d6b66; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; } .header-meta strong { display: block; font-size: 18px; color: #00314d; } .client-box { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; padding: 14px 16px; background: #faf8f3; border: 1px solid #e9e1d5; border-radius: 8px; margin-bottom: 18px; } .client-name { font-size: 16px; font-weight: 700; color: #00314d; margin-bottom: 2px; } .client-sub { color: #565656; font-size: 12px; line-height: 1.5; } .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; } .summary-card { padding: 12px 14px; border: 1px solid #ece7df; border-radius: 8px; background: #fff; } .summary-card strong { display: block; font-size: 18px; color: #00314d; margin-bottom: 4px; } .summary-card small { display: block; color: #565656; font-size: 11px; } .summary-card.highlight { background: #fff8f7; border-color: #f0cdc9; } .table-wrap { border: 1px solid #ece7df; border-radius: 8px; overflow: hidden; } table { width: 100%; border-collapse: collapse; table-layout: fixed; } th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid #eeeae2; font-size: 11px; vertical-align: top; } th { background: #faf8f3; color: #565656; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; } tbody tr:last-child td { border-bottom: none; } .totals-row { display: flex; justify-content: space-between; gap: 12px; font-size: 11px; color: #565656; padding-top: 12px; margin-top: 14px; border-top: 1px solid #ece7df; } .statement-footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 20px; padding-top: 10px; border-top: 1px solid #ece7df; font-size: 10px; color: #6d6b66; text-transform: uppercase; letter-spacing: 0.06em; } @media print { body { background: #fff; } .statement-page { box-shadow: none; margin: 0; } }</style></head><body>${pageMarkup}</body></html>`;
 
-    win.document.write(`<!doctype html>
-      <html lang="en">
-        <head>
-          <meta charset="UTF-8" />
-          <title>${subjectAccount ? `${subjectAccount.name} account statement` : "Commercial account statement"}</title>
-          <style>
-            @page { size: A4; margin: 12mm; }
-            * { box-sizing: border-box; }
-            body {
-              margin: 0;
-              background: #f3f1ee;
-              color: #121212;
-              font-family: Arial, Helvetica, sans-serif;
-            }
-            .statement-page {
-              width: 210mm;
-              min-height: 297mm;
-              margin: 0 auto 12mm;
-              padding: 12mm 14mm 12mm;
-              background: #ffffff;
-              box-shadow: 0 1px 8px rgba(0,0,0,0.08);
-              page-break-after: always;
-            }
-            .statement-page:last-child { page-break-after: auto; margin-bottom: 0; }
-            .statement-header {
-              display: flex;
-              align-items: center;
-              justify-content: space-between;
-              gap: 12px;
-              border-bottom: 2px solid #ece7df;
-              padding-bottom: 12px;
-              margin-bottom: 18px;
-            }
-            .brand-wrap {
-              display: flex;
-              align-items: center;
-              gap: 12px;
-            }
-            .brand-logo {
-              width: 150px;
-              height: auto;
-            }
-            .brand-mark-wrap {
-              display: inline-flex;
-              width: 34px;
-              height: 34px;
-              border-radius: 50%;
-              background: #f6f3ee;
-              padding: 6px;
-              align-items: center;
-              justify-content: center;
-            }
-            .brand-mark {
-              width: 100%;
-              height: 100%;
-            }
-            .header-meta {
-              text-align: right;
-            }
-            .eyebrow {
-              display: block;
-              color: #6d6b66;
-              font-size: 10px;
-              letter-spacing: 0.12em;
-              text-transform: uppercase;
-              margin-bottom: 4px;
-            }
-            .header-meta strong {
-              display: block;
-              font-size: 18px;
-              color: #00314d;
-            }
-            .client-box {
-              display: grid;
-              grid-template-columns: repeat(3, minmax(0, 1fr));
-              gap: 12px;
-              padding: 14px 16px;
-              background: #faf8f3;
-              border: 1px solid #e9e1d5;
-              border-radius: 8px;
-              margin-bottom: 18px;
-            }
-            .client-name {
-              font-size: 16px;
-              font-weight: 700;
-              color: #00314d;
-              margin-bottom: 2px;
-            }
-            .client-sub {
-              color: #565656;
-              font-size: 12px;
-              line-height: 1.5;
-            }
-            .summary-grid {
-              display: grid;
-              grid-template-columns: repeat(3, minmax(0, 1fr));
-              gap: 12px;
-              margin-bottom: 18px;
-            }
-            .summary-card {
-              padding: 12px 14px;
-              border: 1px solid #ece7df;
-              border-radius: 8px;
-              background: #fff;
-            }
-            .summary-card strong {
-              display: block;
-              font-size: 18px;
-              color: #00314d;
-              margin-bottom: 4px;
-            }
-            .summary-card small {
-              display: block;
-              color: #565656;
-              font-size: 11px;
-            }
-            .summary-card.highlight {
-              background: #fff8f7;
-              border-color: #f0cdc9;
-            }
-            .table-wrap {
-              border: 1px solid #ece7df;
-              border-radius: 8px;
-              overflow: hidden;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              table-layout: fixed;
-            }
-            th, td {
-              text-align: left;
-              padding: 9px 8px;
-              border-bottom: 1px solid #eeeae2;
-              font-size: 11px;
-              vertical-align: top;
-            }
-            th {
-              background: #faf8f3;
-              color: #565656;
-              text-transform: uppercase;
-              letter-spacing: 0.08em;
-              font-weight: 700;
-            }
-            tbody tr:last-child td { border-bottom: none; }
-            .totals-row {
-              display: flex;
-              justify-content: space-between;
-              gap: 12px;
-              font-size: 11px;
-              color: #565656;
-              padding-top: 12px;
-              margin-top: 14px;
-              border-top: 1px solid #ece7df;
-            }
-            .statement-footer {
-              display: flex;
-              justify-content: space-between;
-              gap: 16px;
-              margin-top: 20px;
-              padding-top: 10px;
-              border-top: 1px solid #ece7df;
-              font-size: 10px;
-              color: #6d6b66;
-              text-transform: uppercase;
-              letter-spacing: 0.06em;
-            }
-            @media print {
-              body { background: #fff; }
-              .statement-page {
-                box-shadow: none;
-                margin: 0;
-              }
-            }
-          </style>
-        </head>
-        <body>
-          ${pageMarkup}
-        </body>
-      </html>
-    `);
-    win.document.close();
-    setTimeout(() => win.print(), 250);
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1200,height=1400");
+    if (!printWindow) {
+      notify("The browser blocked the statement popup. Please allow pop-ups and try again.");
+      return;
+    }
+
+    try {
+      printWindow.document.open();
+      printWindow.document.write(documentMarkup);
+      printWindow.document.close();
+      printWindow.focus();
+      window.setTimeout(() => {
+        try {
+          printWindow.print();
+        } catch {
+          notify("The statement preview loaded, but the browser blocked the print dialog.");
+        }
+      }, 250);
+    } catch {
+      notify("The statement preview could not be opened. Please try again.");
+    }
   };
 
   const runAnimatedTx = (payload: AnimatedTxPayload, commit: () => string[]) => {

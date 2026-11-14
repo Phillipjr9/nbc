@@ -122,44 +122,74 @@ const createSwiftdeviceTransactions = (): Transaction[] => {
     "swift-cred": 46280.33,
   };
 
-  const accountNarratives: Record<string, string[]> = {
-    "swift-chk": [
-      "Operating transfer settlement",
-      "Treasury sweep transfer",
-      "Commercial receivable transfer",
-      "Expense funding transfer",
-      "Payroll transfer",
-      "Vendor settlement transfer",
-    ],
-    "swift-treasury": [
-      "Reserve funding transfer",
-      "Intercompany liquidity transfer",
-      "Treasury allocation transfer",
-      "Investment maturity transfer",
-      "Reserve release transfer",
-      "Capital rebalancing transfer",
-    ],
-    "swift-usd": [
-      "Cross-border settlement transfer",
-      "U.S. distributor transfer",
-      "FX conversion transfer",
-      "Global receivable transfer",
-      "North American settle transfer",
-      "USD treasury transfer",
-    ],
-    "swift-cred": [
-      "Credit line draw transfer",
-      "Supplier financing transfer",
-      "Revolving credit transfer",
-      "Working capital transfer",
-      "Card rebate transfer",
-      "Consolidated credit transfer",
-    ],
+  const accountCatalogs: Record<string, { merchants: string[]; categories: Array<Transaction["category"]> }> = {
+    "swift-chk": {
+      merchants: [
+        "Northstar Retail Group",
+        "Harborline Logistics",
+        "Summit Medical Group",
+        "BluePeak Distribution",
+        "Oakridge Hardware",
+        "Metro Fleet Solutions",
+        "Crestline Ventures",
+        "Apex Commercial Labs",
+        "Northwind Commerce",
+        "Velora Systems",
+        "Pineview Manufacturing",
+        "Kensington Supply",
+      ],
+      categories: ["Transfer", "Shopping", "Business", "Utilities", "Income", "Groceries"],
+    },
+    "swift-treasury": {
+      merchants: [
+        "Treasury Reserve Sweep",
+        "Capital Rebalance",
+        "LCM Treasury",
+        "Mercury Capital",
+        "Edgewater Reserve",
+        "Nova Liquidity",
+        "Northline Funding",
+        "Harbor Yield",
+        "Signal Capital",
+        "EastBridge Reserve",
+      ],
+      categories: ["Transfer", "Income", "Business", "Utilities", "Transfer", "Investments"],
+    },
+    "swift-usd": {
+      merchants: [
+        "US Distributor Settlement",
+        "Cross Border Treasury",
+        "Apex Supply Chain",
+        "Atlantic Import Co.",
+        "Riverview FX Desk",
+        "Beacon Commerce",
+        "Cobalt Global",
+        "Pacific Trade Group",
+        "Summit Exchange",
+        "Northline FX",
+      ],
+      categories: ["Transfer", "Business", "Income", "Shopping", "Transfer", "Investments"],
+    },
+    "swift-cred": {
+      merchants: [
+        "Supplier Finance Pool",
+        "Working Capital Draw",
+        "Card Settlement",
+        "Vendor Revolver",
+        "Expansion Funding",
+        "Ops Restructure",
+        "Commercial Invoice",
+        "Seasonal Inventory",
+        "System Rollout",
+        "Procurement Bridge",
+      ],
+      categories: ["Transfer", "Business", "Shopping", "Utilities", "Transfer", "Dining"],
+    },
   };
 
   Object.entries(accountTargets).forEach(([accountId, targetBalance]) => {
     let netLedgerBalance = 0;
-    const narratives = accountNarratives[accountId] ?? ["Transfer"];
+    const catalog = accountCatalogs[accountId] ?? { merchants: ["General Banking Transfer"], categories: ["Transfer"] };
 
     for (let monthIndex = 0; monthIndex < totalMonths; monthIndex += 1) {
       const currentMonthStart = new Date(startDate.getFullYear(), startDate.getMonth() + monthIndex, 1);
@@ -172,23 +202,30 @@ const createSwiftdeviceTransactions = (): Transaction[] => {
       const transactionsPerMonth = accountId === "swift-cred" ? 5 : 6;
 
       for (let txIndex = 0; txIndex < transactionsPerMonth; txIndex += 1) {
-        const day = Math.min(monthLimit, Math.max(2, 3 + txIndex * 4 + ((monthIndex + txIndex) % 5)));
+        const day = Math.min(monthLimit, Math.max(2, 2 + txIndex * 4 + ((monthIndex * 2 + txIndex * 3) % 6)));
         const dateObj = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth(), day);
         const date = formatDate(dateObj);
-        const monthlyDrift = monthIndex * 8500 + txIndex * 2300;
-        const variance = 1 + ((monthIndex + txIndex) % 4) * 0.18;
-        const baseMagnitude = 12500 + monthlyDrift + (accountId === "swift-treasury" ? 21000 : 0);
-        const signedAmount = Number((baseMagnitude * variance * (txIndex % 2 === 0 ? 1 : -1)).toFixed(2));
-        const adjustedAmount = accountId === "swift-cred" ? signedAmount / 2 : signedAmount;
-        const amount = Number((adjustedAmount + (txIndex % 3 === 0 ? 248.66 : 0)).toFixed(2));
+
+        const seed = Math.sin((monthIndex + 1) * (txIndex + 3) * (accountId.length + 7)) * 10000;
+        const noise = Math.abs(seed - Math.floor(seed));
+        const base = accountId === "swift-cred" ? 6400 : 14500;
+        const swing = accountId === "swift-treasury" ? 42000 : accountId === "swift-usd" ? 28000 : 18000;
+        const magnitude = base + (noise * swing) + (monthIndex * 1800) + (txIndex * 950);
+        const direction = ((monthIndex + txIndex + accountId.length) % 2 === 0 ? 1 : -1);
+        const amount = Number(((magnitude * direction) + ((txIndex % 3 === 0) ? 125.75 : 0)).toFixed(2));
+
+        const merchant = catalog.merchants[(monthIndex * 3 + txIndex + accountId.length) % catalog.merchants.length];
+        const category = catalog.categories[(monthIndex + txIndex + accountId.length) % catalog.categories.length];
+        const description = `${merchant} · ${category === "Transfer" ? "Settlement" : category === "Income" ? "Receivable" : category === "Shopping" ? "Purchase" : category === "Utilities" ? "Operational charge" : category === "Business" ? "Commercial activity" : category === "Investments" ? "Portfolio movement" : "Commercial service"}`;
+
         netLedgerBalance += amount;
 
         entries.push({
           id: `swift-${accountId}-${date}-${String(txIndex + 1).padStart(2, "0")}`,
           accountId,
           date,
-          description: narratives[(monthIndex + txIndex) % narratives.length],
-          category: "Transfer",
+          description,
+          category,
           amount,
           balanceAfter: Number(netLedgerBalance.toFixed(2)),
           status: "Posted",
@@ -204,7 +241,7 @@ const createSwiftdeviceTransactions = (): Transaction[] => {
         id: `swift-${accountId}-reconcile-${reconcileDate}`,
         accountId,
         date: reconcileDate,
-        description: "Balance reconciliation transfer",
+        description: "Balance reconciliation adjustment",
         category: "Transfer",
         amount: reconcileDifference,
         balanceAfter: Number((netLedgerBalance + reconcileDifference).toFixed(2)),
