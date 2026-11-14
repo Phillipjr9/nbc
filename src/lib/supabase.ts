@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, Session, User } from "@supabase/supabase-js";
 
 const env = import.meta.env as Record<string, string | undefined>;
 const supabaseUrl =
@@ -22,8 +22,11 @@ export const supabase = createClient(
   supabaseAnonKey ?? "placeholder-anon-key",
   {
     auth: {
-      persistSession: false,
-      autoRefreshToken: false,
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
     },
   }
 );
+
+export type { Session, User };

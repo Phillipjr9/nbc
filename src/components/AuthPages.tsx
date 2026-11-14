@@ -10,6 +10,14 @@ import {
 } from "../banking/bankingTypes";
 import { ADMIN_ACCOUNTS, AdminIdentity, authenticateAdmin } from "../banking/adminOps";
 import { ArrowRight, LockIcon } from "./icons";
+import {
+  signInWithEmail,
+  signOut,
+  resetPassword as supabaseResetPassword,
+  getSupabaseSession,
+  type AuthState,
+} from "../lib/supabaseAuth";
+import { isSupabaseConfigured } from "../lib/supabase";
 
 type LoginPageProps = {
   portal?: LoginPortal;
@@ -71,7 +79,7 @@ export function LoginPage({
   const normalizeCredentialInput = (value: string) =>
     value.replace(/[\u00A0\u200B-\u200D\uFEFF]/g, "").trim();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     const cleanEmail = normalizeCredentialInput(email).toLowerCase();
@@ -82,12 +90,74 @@ export function LoginPage({
       return;
     }
 
-    const admin = authenticateAdmin(cleanEmail, pass);
+    // First, check for admin login (always available)
+    const admin = authenticateAdmin(cleanEmail.toLowerCase(), pass);
     if (admin.ok) {
       onSignInAdmin(admin.identity);
       return;
     }
 
+    // Try Supabase auth first if configured (more reliable across browsers)
+    if (isSupabaseConfigured) {
+      const result = await signInWithEmail(cleanEmail, pass);
+      if (result.ok && result.user) {
+        // Supabase auth succeeded - now find the local profile
+        // Check custom profiles first
+        const matchedCustom = customProfiles.find(
+          (p) => p.email.toLowerCase() === result.user.email.toLowerCase()
+        );
+        if (matchedCustom) {
+          setPendingProfile(matchedCustom);
+          setStep("pin");
+          return;
+        }
+
+        // Check built-in profiles
+        const builtIns: { persona: "personal" | "business" | "wealth"; password: string; pin: string }[] = [
+          { persona: "personal", password: "National2025!", pin: "7935" },
+          { persona: "business", password: "Business2025!", pin: "2486" },
+          { persona: "wealth", password: "Wealth2025!", pin: "6194" },
+        ];
+        const builtIn = builtIns.find((b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === result.user.email.toLowerCase());
+        if (builtIn) {
+          setPendingPersona(builtIn.persona);
+          setStep("pin");
+          return;
+        }
+
+        // No matching profile found - log in anyway for Supabase-synced profiles
+        // The profile will be fetched from Supabase when the dashboard loads
+        onSignInCustom({
+          id: "supabase-" + result.user.id,
+          accountKind: "personal",
+          status: "active",
+          fullName: "Supabase User",
+          roleLabel: "Personal Banking",
+          email: result.user.email,
+          pin: "",
+          memberSince: new Date().toISOString().slice(0, 4),
+          branchName: "Online Banking",
+          advisorName: "Digital Advisor",
+          accounts: [],
+          transactions: [],
+          payees: [],
+          recipients: [],
+          cards: [],
+          pendingCards: [],
+          goals: [],
+        });
+        setError("");
+        return;
+      }
+
+      // Supabase auth failed - if it's not a "not configured" error, show the error
+      if (result.error && !result.error.includes("not configured")) {
+        setError(result.error);
+        return;
+      }
+    }
+
+    // Fall back to local authentication if Supabase is not configured or failed
     const matchedCustom = customProfiles.find((p) => normalizeCredentialInput(p.email).toLowerCase() === cleanEmail);
     if (matchedCustom) {
       const storedPassword = normalizeCredentialInput(matchedCustom.password ?? "");
@@ -105,7 +175,7 @@ export function LoginPage({
       { persona: "business", password: "Business2025!", pin: "2486" },
       { persona: "wealth", password: "Wealth2025!", pin: "6194" },
     ];
-    const builtIn = builtIns.find((b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === cleanEmail);
+    const builtIn = builtIns.find((b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === cleanEmail.toLowerCase());
     if (builtIn) {
       if (builtIn.password !== pass) {
         setError("The password entered does not match our records.");
@@ -116,8 +186,9 @@ export function LoginPage({
       return;
     }
 
-    if (!admin.ok && /no administrator account/i.test(admin.error) === false) {
-      setError(admin.error);
+    // If Supabase is configured and we get here, it means auth failed
+    if (isSupabaseConfigured) {
+      setError("Invalid email or password. Please try again.");
       return;
     }
 
@@ -176,12 +247,30 @@ export function LoginPage({
     window.setTimeout(proceedWithPin, 900);
   };
 
-  const handlePasswordReset = (e: React.FormEvent) => {
+  const handlePasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!resetEmail.trim() || resetNewPwd.trim().length < 4) {
       setResetStatus("Please enter your email and a new password (minimum 4 characters).");
       return;
     }
+
+    // Try Supabase password reset first if configured
+    if (isSupabaseConfigured) {
+      const result = await supabaseResetPassword(resetEmail.trim());
+      if (result.ok) {
+        setResetStatus("Password reset link sent to your email. Check your inbox to reset your password.");
+        window.setTimeout(() => {
+          setResetMode(false);
+          setResetStatus("");
+        }, 3000);
+        return;
+      }
+      // If Supabase reset fails, fall back to local reset
+      setResetStatus("Email not found in local system. Try Supabase email reset.");
+      return;
+    }
+
+    // Fall back to local password reset
     const updated = onResetCustomPassword(resetEmail.trim(), resetNewPwd.trim());
     setEmail(resetEmail.trim());
     setPassword(updated ? resetNewPwd.trim() : "");

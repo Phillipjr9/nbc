@@ -1863,6 +1863,7 @@ export default function Dashboard({
               {(
                 [
                   ["internal", "Between my accounts"],
+                  ["card", "Card transfer"],
                   ["etransfer", "Interac e-Transfer®"],
                   ["bills", "Pay a bill"],
                   ["deposit", "Deposit a cheque"],
