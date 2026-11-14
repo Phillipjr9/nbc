@@ -6,7 +6,6 @@ import {
   INITIAL_BANK_CONFIG,
   INITIAL_PROFILES,
   PageRoute,
-  Transaction,
   normalizeBankCardList,
 } from "./banking/bankingTypes";
 import {
@@ -84,329 +83,13 @@ const INITIAL_AUDIT: AuditLogEntry[] = [
   },
 ];
 
-const STARTER_CUSTOM_PROFILE: BankUserProfile = {
-  ...INITIAL_PROFILES.business,
-  fullName: "Phillip Johnson",
-  roleLabel: "Business (SME) Banking",
-  email: "phillip@nbc.ca",
-  password: "Business2026!",
-  pin: "4682",
-  memberSince: "2026",
-  branchName: "Commercial Centre, Ottawa, ON",
-  advisorName: "Marie Lambert, Senior Commercial Account Manager",
-  businessNumber: "BN 10204-7731 RC0001 · NEQ 1182149234",
-  phone: "+1 (613) 555-0194",
-  address: "1205 Wellington Street",
-  city: "Ottawa",
-  province: "ON",
-  postalCode: "K1Y 1A6",
-  lastLogin: "Just now",
-};
-
-const createSwiftdeviceTransactions = (): Transaction[] => {
-  const entries: Transaction[] = [];
-  const startDate = new Date("2024-02-02T00:00:00");
-  const endDate = new Date();
-
-  const totalMonths =
-    (endDate.getFullYear() - startDate.getFullYear()) * 12 +
-    (endDate.getMonth() - startDate.getMonth()) +
-    1;
-
-  const formatDate = (target: Date) =>
-    `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, "0")}-${String(target.getDate()).padStart(2, "0")}`;
-
-  const accountTargets: Record<string, number> = {
-    "swift-chk": 1842782.55,
-    "swift-treasury": 2993290.9,
-    "swift-usd": 642750.86,
-    "swift-cred": 46280.33,
-  };
-
-  const accountCatalogs: Record<string, { merchants: string[]; categories: Array<Transaction["category"]> }> = {
-    "swift-chk": {
-      merchants: [
-        "Northstar Retail Group",
-        "Harborline Logistics",
-        "Summit Medical Group",
-        "BluePeak Distribution",
-        "Oakridge Hardware",
-        "Metro Fleet Solutions",
-        "Crestline Ventures",
-        "Apex Commercial Labs",
-        "Northwind Commerce",
-        "Velora Systems",
-        "Pineview Manufacturing",
-        "Kensington Supply",
-      ],
-      categories: ["Transfer", "Shopping", "Business", "Utilities", "Income", "Groceries"],
-    },
-    "swift-treasury": {
-      merchants: [
-        "Treasury Reserve Sweep",
-        "Capital Rebalance",
-        "LCM Treasury",
-        "Mercury Capital",
-        "Edgewater Reserve",
-        "Nova Liquidity",
-        "Northline Funding",
-        "Harbor Yield",
-        "Signal Capital",
-        "EastBridge Reserve",
-      ],
-      categories: ["Transfer", "Income", "Business", "Utilities", "Transfer", "Investments"],
-    },
-    "swift-usd": {
-      merchants: [
-        "US Distributor Settlement",
-        "Cross Border Treasury",
-        "Apex Supply Chain",
-        "Atlantic Import Co.",
-        "Riverview FX Desk",
-        "Beacon Commerce",
-        "Cobalt Global",
-        "Pacific Trade Group",
-        "Summit Exchange",
-        "Northline FX",
-      ],
-      categories: ["Transfer", "Business", "Income", "Shopping", "Transfer", "Investments"],
-    },
-    "swift-cred": {
-      merchants: [
-        "Supplier Finance Pool",
-        "Working Capital Draw",
-        "Card Settlement",
-        "Vendor Revolver",
-        "Expansion Funding",
-        "Ops Restructure",
-        "Commercial Invoice",
-        "Seasonal Inventory",
-        "System Rollout",
-        "Procurement Bridge",
-      ],
-      categories: ["Transfer", "Business", "Shopping", "Utilities", "Transfer", "Dining"],
-    },
-  };
-
-  Object.entries(accountTargets).forEach(([accountId, targetBalance]) => {
-    let netLedgerBalance = 0;
-    const catalog = accountCatalogs[accountId] ?? { merchants: ["General Banking Transfer"], categories: ["Transfer"] };
-
-    for (let monthIndex = 0; monthIndex < totalMonths; monthIndex += 1) {
-      const currentMonthStart = new Date(startDate.getFullYear(), startDate.getMonth() + monthIndex, 1);
-      const maxDayInMonth = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() + 1, 0).getDate();
-      const monthLimit =
-        currentMonthStart.getFullYear() === endDate.getFullYear() && currentMonthStart.getMonth() === endDate.getMonth()
-          ? endDate.getDate()
-          : maxDayInMonth;
-
-      const transactionsPerMonth = accountId === "swift-cred" ? 5 : 6;
-
-      for (let txIndex = 0; txIndex < transactionsPerMonth; txIndex += 1) {
-        const day = Math.min(monthLimit, Math.max(2, 2 + txIndex * 4 + ((monthIndex * 2 + txIndex * 3) % 6)));
-        const dateObj = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth(), day);
-        const date = formatDate(dateObj);
-
-        const seed = Math.sin((monthIndex + 1) * (txIndex + 3) * (accountId.length + 7)) * 10000;
-        const noise = Math.abs(seed - Math.floor(seed));
-        const base = accountId === "swift-cred" ? 6400 : 14500;
-        const swing = accountId === "swift-treasury" ? 42000 : accountId === "swift-usd" ? 28000 : 18000;
-        const magnitude = base + (noise * swing) + (monthIndex * 1800) + (txIndex * 950);
-        const direction = ((monthIndex + txIndex + accountId.length) % 2 === 0 ? 1 : -1);
-        const amount = Number(((magnitude * direction) + ((txIndex % 3 === 0) ? 125.75 : 0)).toFixed(2));
-
-        const merchant = catalog.merchants[(monthIndex * 3 + txIndex + accountId.length) % catalog.merchants.length];
-        const category = catalog.categories[(monthIndex + txIndex + accountId.length) % catalog.categories.length];
-        const description = `${merchant} · ${category === "Transfer" ? "Settlement" : category === "Income" ? "Receivable" : category === "Shopping" ? "Purchase" : category === "Utilities" ? "Operational charge" : category === "Business" ? "Commercial activity" : category === "Investments" ? "Portfolio movement" : "Commercial service"}`;
-
-        netLedgerBalance += amount;
-
-        entries.push({
-          id: `swift-${accountId}-${date}-${String(txIndex + 1).padStart(2, "0")}`,
-          accountId,
-          date,
-          description,
-          category,
-          amount,
-          balanceAfter: Number(netLedgerBalance.toFixed(2)),
-          status: "Posted",
-        });
-      }
-    }
-
-    const reconcileDifference = Number((targetBalance - netLedgerBalance).toFixed(2));
-    const reconcileDate = formatDate(new Date(endDate.getFullYear(), endDate.getMonth(), Math.min(endDate.getDate(), 28)));
-
-    if (Math.abs(reconcileDifference) > 0.01) {
-      entries.push({
-        id: `swift-${accountId}-reconcile-${reconcileDate}`,
-        accountId,
-        date: reconcileDate,
-        description: "Balance reconciliation adjustment",
-        category: "Transfer",
-        amount: reconcileDifference,
-        balanceAfter: Number((netLedgerBalance + reconcileDifference).toFixed(2)),
-        status: "Posted",
-      });
-    }
-  });
-
-  return entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-};
-
-const getFreshSwiftdeviceProfile = (): BankUserProfile => ({
-  ...SWIFDEVICE_CUSTOM_PROFILE,
-  transactions: createSwiftdeviceTransactions(),
-});
-
-const SWIFDEVICE_CUSTOM_PROFILE: BankUserProfile = {
-  id: "business",
-  accountKind: "business",
-  status: "active",
-  fullName: "Catherine White",
-  roleLabel: "Business (SME) Banking",
-  email: "catherine.white@swiftdevice.ca",
-  password: "Swiftdevice2025!",
-  pin: "1988",
-  memberSince: "2023",
-  branchName: "Commercial Centre, Toronto, ON",
-  advisorName: "Natalie Harper, Senior Business Advisor",
-  businessNumber: "Swiftdevice LLC Client account 2025",
-  phone: "+1 (416) 555-0148",
-  address: "180 King Street West",
-  city: "Toronto",
-  province: "ON",
-  postalCode: "M5H 1J9",
-  notes: "Commercial account for Swiftdevice LLC, focused on device distribution and enterprise hardware deployments.",
-  lastLogin: "Today",
-  accounts: [
-    {
-      id: "swift-chk",
-      name: "Business Operating Account",
-      number: "0006-14480-33",
-      category: "chequing",
-      balance: 1842782.55,
-      currency: "CAD",
-      subtitle: "Large enterprise receivables and vendor settlement",
-    },
-    {
-      id: "swift-treasury",
-      name: "Treasury Reserve Account",
-      number: "0006-14480-88",
-      category: "savings",
-      balance: 2993290.90,
-      currency: "CAD",
-      rate: "1.85% yield",
-      subtitle: "Operational reserve for 2025 hardware pipeline",
-    },
-    {
-      id: "swift-usd",
-      name: "U.S. Settlement Account",
-      number: "0006-14480-91",
-      category: "chequing",
-      balance: 642750.86,
-      currency: "USD",
-      subtitle: "Global distributor settlements",
-    },
-    {
-      id: "swift-cred",
-      name: "Business Credit Line",
-      number: "BL-330125",
-      category: "credit",
-      balance: 46280.33,
-      limit: 800000,
-      currency: "CAD",
-      rate: "6.25%",
-      subtitle: "Available limit: $753,720.00",
-    },
-  ],
-  transactions: createSwiftdeviceTransactions(),
-  payees: [
-    { id: "swift-pay-1", name: "Revenu Québec — Source deductions", accountRef: "RQ-SWIFT-2025", category: "Tax" },
-    { id: "swift-pay-2", name: "CIBC Commercial Lease", accountRef: "CIBC-LEASE-1186", category: "Operations" },
-    { id: "swift-pay-3", name: "NorthAmerica Logistics Ltd.", accountRef: "NAL-44712", category: "Shipping" },
-  ],
-  recipients: [
-    { id: "swift-rec-1", name: "Northstar Retail Group", email: "ap@northstarretail.example", bank: "Wire transfer" },
-    { id: "swift-rec-2", name: "PeakWorks Distribution", email: "settlements@peakworks.example", bank: "Interac e-Transfer®" },
-    { id: "swift-rec-3", name: "CityView Developments", email: "payments@cityview.example", bank: "Wire transfer" },
-  ],
-  cards: [
-    {
-      id: "swift-card-1",
-      label: "Swiftdevice Business Mastercard",
-      network: "Mastercard",
-      last4: "1528",
-      expiry: "07/29",
-      cvv: "841",
-      cardholderName: "CATHERINE WHITE",
-      monthlyLimit: 80000,
-      linkedAccountId: "swift-cred",
-      locked: false,
-      contactless: true,
-      international: true,
-      onlinePurchases: true,
-      rewardsPoints: 286400,
-      cashbackRate: "1.25% on corporate spend",
-      accent: "business",
-      status: "active",
-      issuedAt: "2024-11-13",
-    },
-  ],
-  goals: [
-    {
-      id: "swift-goal-1",
-      title: "Ontario Distribution Expansion Reserve",
-      target: 1800000,
-      current: 1265000,
-      deadline: "Dec 2025",
-      linkedAccountId: "swift-treasury",
-    },
-    {
-      id: "swift-goal-2",
-      title: "Technology Procurement Reserve",
-      target: 950000,
-      current: 620000,
-      deadline: "Mar 2026",
-      linkedAccountId: "swift-treasury",
-    },
-  ],
-  payrollRoster: [
-    { id: "swift-emp-1", name: "Alicia Morgan", role: "Finance Director", biweeklyNet: 6200, department: "Finance", active: true },
-    { id: "swift-emp-2", name: "Daniel Park", role: "Operations Manager", biweeklyNet: 5400, department: "Operations", active: true },
-    { id: "swift-emp-3", name: "Monique Tremblay", role: "Procurement Lead", biweeklyNet: 4760, department: "Procurement", active: true },
-    { id: "swift-emp-4", name: "Ethan Ross", role: "Sales Director", biweeklyNet: 6100, department: "Sales", active: true },
-  ],
-  invoices: [
-    { id: "swift-inv-1", invoiceNo: "INV-2025-410", clientName: "Northstar Retail Group", amount: 24358.42, currency: "CAD", dueDate: "2025-01-20", status: "Paid" },
-    { id: "swift-inv-2", invoiceNo: "INV-2025-511", clientName: "CityView Developments", amount: 18422.15, currency: "CAD", dueDate: "2025-02-08", status: "Paid" },
-    { id: "swift-inv-3", invoiceNo: "INV-2025-602", clientName: "Harborline Logistics", amount: 31640.71, currency: "CAD", dueDate: "2025-02-22", status: "Paid" },
-    { id: "swift-inv-4", invoiceNo: "INV-2025-714", clientName: "Summit Retail Group", amount: 67250.91, currency: "CAD", dueDate: "2025-04-11", status: "Open" },
-    { id: "swift-inv-5", invoiceNo: "INV-2025-819", clientName: "Northshore Health Services", amount: 88340.46, currency: "CAD", dueDate: "2025-06-28", status: "Open" },
-    { id: "swift-inv-6", invoiceNo: "INV-2025-922", clientName: "Atlas Mobility", amount: 94265.17, currency: "CAD", dueDate: "2025-08-18", status: "Paid" },
-  ],
-  scheduled: [
-    {
-      id: "swift-sch-1",
-      fromAccountId: "swift-chk",
-      toAccountId: "swift-treasury",
-      kind: "internal",
-      amount: 75000,
-      frequency: "monthly",
-      nextDate: "2026-01-15",
-      description: "Treasury reserve transfer",
-      active: true,
-    },
-  ],
-};
-
-const DEFAULT_CUSTOM_PROFILES = [STARTER_CUSTOM_PROFILE, SWIFDEVICE_CUSTOM_PROFILE];
-
-const PIN_BY_EMAIL: Record<string, string> = {
-  "phillip@nbc.ca": STARTER_CUSTOM_PROFILE.pin ?? "4682",
-  "catherine.white@swiftdevice.ca": SWIFDEVICE_CUSTOM_PROFILE.pin ?? "1988",
-  "comptabilite@ateliernord.ca": INITIAL_PROFILES.business.pin ?? "2486",
-};
+const sanitizeCustomProfiles = (profiles: BankUserProfile[] = []): BankUserProfile[] =>
+  profiles
+    .filter((profile) => Boolean(profile?.email))
+    .map((profile) => ({
+      ...profile,
+      cards: normalizeBankCardList(profile.cards),
+    }));
 
 export default function App() {
   const [route, setRoute] = useState<PageRoute>(() => hashToRoute(window.location.hash));
@@ -422,37 +105,8 @@ export default function App() {
     };
   });
   const [customProfiles, setCustomProfiles] = useState<BankUserProfile[]>(() => {
-    const stored = loadStored<BankUserProfile[]>(STORAGE_CUSTOM_KEY, DEFAULT_CUSTOM_PROFILES);
-    const merged = stored.map((item) => {
-      const email = item.email?.toLowerCase();
-      if (!email) return { ...item, cards: normalizeBankCardList(item.cards) };
-
-      if (email === SWIFDEVICE_CUSTOM_PROFILE.email.toLowerCase()) {
-        return {
-          ...getFreshSwiftdeviceProfile(),
-          ...item,
-          cards: normalizeBankCardList(item.cards),
-          pin: SWIFDEVICE_CUSTOM_PROFILE.pin ?? "1988",
-          transactions: createSwiftdeviceTransactions(),
-        };
-      }
-
-      const fallbackPin = PIN_BY_EMAIL[email];
-      if (fallbackPin && (!item.pin || item.pin.trim() === "")) {
-        return { ...item, cards: normalizeBankCardList(item.cards), pin: fallbackPin };
-      }
-
-      return { ...item, cards: normalizeBankCardList(item.cards) };
-    });
-
-    for (const candidate of DEFAULT_CUSTOM_PROFILES) {
-      const found = merged.some((item) => item.email.toLowerCase() === candidate.email.toLowerCase());
-      if (!found) {
-        merged.push(candidate);
-      }
-    }
-
-    return merged;
+    const stored = loadStored<BankUserProfile[]>(STORAGE_CUSTOM_KEY, []);
+    return sanitizeCustomProfiles(Array.isArray(stored) ? stored : []);
   });
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -683,7 +337,7 @@ export default function App() {
 
   const activeDashboardRoute: PageRoute = useMemo(() => {
     if (activeProfile && isBusinessProfile(activeProfile)) {
-      return { kind: "business-dashboard", tab: "cash-position" };
+      return { kind: "business-dashboard", tab: "cards" };
     }
     return { kind: "personal-dashboard" };
   }, [activeProfile]);
@@ -736,7 +390,7 @@ export default function App() {
   const openDashboardForProfile = (profile: BankUserProfile) => {
     navigate(
       isBusinessProfile(profile)
-        ? { kind: "business-dashboard", tab: "cash-position" }
+        ? { kind: "business-dashboard", tab: "cards" }
         : { kind: "personal-dashboard" }
     );
   };

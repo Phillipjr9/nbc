@@ -132,8 +132,7 @@ export function LoginPage({
 
     const proceedWithPin = () => {
       if (pendingProfile) {
-        const expectedPin = pendingProfile.pin?.trim() ||
-          (pendingProfile.email.toLowerCase() === "catherine.white@swiftdevice.ca" ? "1988" : "");
+        const expectedPin = pendingProfile.pin?.trim() || "";
         if (!expectedPin) {
           setError("This account does not have a saved security PIN configured.");
           setIsPinChecking(false);
@@ -192,6 +191,12 @@ export function LoginPage({
   return (
     <div className="bg-[#f8f6f1] py-12 sm:py-16">
       <div className="nbc-container max-w-[1000px]">
+        {/* Universal sign-in — the credential decides where you land */}
+        <div className="mb-6 rounded-[6px] border border-[#e5e2da] bg-white px-4 py-3 text-[13px] leading-[19px] text-[#565656]">
+          <strong className="font-semibold text-nbc-navy">One sign-in for every client.</strong> Enter your email and
+          password to authenticate the account, then confirm the saved security PIN to complete the session.
+        </div>
+
         <div className="grid gap-8 lg:grid-cols-12">
           {/* Left: Authentic National Bank Sign-In Card */}
           <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5 shadow-[0_1px_4px_rgba(0,0,0,0.04)] sm:p-8 lg:col-span-7">

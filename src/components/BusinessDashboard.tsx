@@ -192,7 +192,7 @@ export default function BusinessDashboard({
   const [businessCardAmt, setBusinessCardAmt] = useState("250.00");
   const [businessCardMemo, setBusinessCardMemo] = useState("");
   const [isAddingCard, setIsAddingCard] = useState(profile.cards.length === 0);
-  const [newCardLabel, setNewCardLabel] = useState("Swiftdevice Business Mastercard");
+  const [newCardLabel, setNewCardLabel] = useState("Business Mastercard");
   const [newCardHolderName, setNewCardHolderName] = useState(profile.fullName.toUpperCase());
   const [newCardNumber, setNewCardNumber] = useState("");
   const [newCardExpiry, setNewCardExpiry] = useState("07/29");
@@ -1129,7 +1129,7 @@ export default function BusinessDashboard({
     const issuedAt = todayIso();
     const nextCard = {
       id: `biz-card-${Date.now()}`,
-      label: newCardLabel.trim() || "Swiftdevice Business Mastercard",
+      label: newCardLabel.trim() || "Business Mastercard",
       network: "Mastercard" as const,
       number: normalizedCardNumber,
       last4: normalizedLast4,
@@ -1157,7 +1157,7 @@ export default function BusinessDashboard({
     setBusinessCardId(nextCard.id);
     setCardFundingSourceId(linkedAccountId || cardFundingSourceId);
     setIsAddingCard(false);
-    setNewCardLabel("Swiftdevice Business Mastercard");
+    setNewCardLabel("Business Mastercard");
     setNewCardHolderName(profile.fullName.toUpperCase());
     setNewCardNumber("");
     setNewCardExpiry("07/29");
