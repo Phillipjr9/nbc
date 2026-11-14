@@ -16,7 +16,7 @@ import {
   FX_RATES,
   TRANSFER_FAILURE_REASONS,
 } from "../banking/bankingTypes";
-import { round2 } from "../banking/adminOps";
+import { randomDigits, round2 } from "../banking/adminOps";
 import BankCardVisual from "./BankCardVisual";
 import { ArrowRight, HelpIcon, LockIcon, SearchIcon } from "./icons";
 import TransactionSendOverlay, {
