@@ -192,12 +192,6 @@ export function LoginPage({
   return (
     <div className="bg-[#f8f6f1] py-12 sm:py-16">
       <div className="nbc-container max-w-[1000px]">
-        {/* Universal sign-in — the credential decides where you land */}
-        <div className="mb-6 rounded-[6px] border border-[#e5e2da] bg-white px-4 py-3 text-[13px] leading-[19px] text-[#565656]">
-          <strong className="font-semibold text-nbc-navy">One sign-in for every client.</strong> Enter your email and
-          password to authenticate the account, then confirm the saved security PIN to complete the session.
-        </div>
-
         <div className="grid gap-8 lg:grid-cols-12">
           {/* Left: Authentic National Bank Sign-In Card */}
           <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5 shadow-[0_1px_4px_rgba(0,0,0,0.04)] sm:p-8 lg:col-span-7">
@@ -701,7 +695,7 @@ export function SignupPage({ initialSegment = "personal", onNavigate, onCreatePr
   const [confirmPwd, setConfirmPwd] = useState("");
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
-  const [branchCity, setBranchCity] = useState("Place Ville Marie — Montreal, QC");
+  const [branchCity, setBranchCity] = useState("Place Ville Marie, Montreal, QC");
 
   const [initialDeposit, setInitialDeposit] = useState(6000);
   const [includeCard, setIncludeCard] = useState(true);
@@ -1082,12 +1076,12 @@ export function SignupPage({ initialSegment = "personal", onNavigate, onCreatePr
                     onChange={(e) => setBranchCity(e.target.value)}
                     className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3.5 py-2.5 text-[14.5px] text-nbc-navy"
                   >
-                    <option>Place Ville Marie — Montreal, QC</option>
-                    <option>King Street West — Toronto, ON</option>
-                    <option>Laurier Boulevard — Quebec City, QC</option>
-                    <option>Sparks Street — Ottawa, ON</option>
-                    <option>Burrard Street — Vancouver, BC</option>
-                    <option>Stephen Avenue — Calgary, AB</option>
+                    <option>Place Ville Marie, Montreal, QC</option>
+                    <option>King Street West, Toronto, ON</option>
+                    <option>Laurier Boulevard, Quebec City, QC</option>
+                    <option>Sparks Street, Ottawa, ON</option>
+                    <option>Burrard Street, Vancouver, BC</option>
+                    <option>Stephen Avenue, Calgary, AB</option>
                   </select>
                 </div>
 

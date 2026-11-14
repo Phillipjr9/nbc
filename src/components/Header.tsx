@@ -317,14 +317,6 @@ export default function Header({
                           >
                             Become a client →
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => go({ kind: "admin-login" })}
-                            className="flex items-center gap-1.5 text-[12px] font-medium text-[#565656] underline underline-offset-2 hover:text-nbc-navy"
-                          >
-                            <LockIcon className="h-3 w-3" />
-                            Employee administration
-                          </button>
                         </div>
                       </div>
                     )}

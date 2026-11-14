@@ -9,6 +9,7 @@ import {
 import {
   BusinessInvoice,
   BankUserProfile,
+  DEFAULT_PREFERENCES,
   EmployeePayrollItem,
   formatMoney,
   FX_RATES,
@@ -21,7 +22,7 @@ import TransactionSendOverlay, {
   AnimatedTxPhase,
 } from "./TransactionSendOverlay";
 
-type BizTab = "treasury" | "payroll" | "invoices" | "wires" | "cards" | "ledger" | "account";
+type BizTab = "treasury" | "payroll" | "invoices" | "wires" | "cards" | "ledger" | "account" | "settings";
 
 type Props = {
   profile: BankUserProfile;
@@ -808,6 +809,7 @@ export default function BusinessDashboard({
     ["wires", "Wires & tax remittances"],
     ["cards", "Corporate cards"],
     ["ledger", "Statements"],
+    ["settings", "Profile & security"],
   ];
 
   return (
@@ -929,31 +931,322 @@ export default function BusinessDashboard({
       )}
 
       <main className="nbc-container pt-8">
-        {/* Entity Identification Strip */}
-        <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-[#e5e2da] pb-5">
-          <div className="min-w-0">
-            <h1 className="break-words text-[26px] font-bold leading-[32px] text-nbc-navy sm:text-[32px] sm:leading-[38px]">
-              {profile.fullName}
-            </h1>
-            <p className="mt-1 text-[13px] text-[#565656] sm:text-[13.5px]">
-              {profile.businessNumber ?? "Corporate Operating Profile"} · {profile.branchName}
-            </p>
-          </div>
-          <div className="grid w-full grid-cols-2 gap-4 sm:flex sm:w-auto sm:gap-6 sm:text-right">
-            <div>
-              <span className="block text-[12px] text-[#565656]">Consolidated liquidity (CAD eq.)</span>
-              <span className="text-[18px] font-bold tabular-nums text-nbc-navy sm:text-[20px]">
-                {formatMoney(summary.totalLiquidityCad)}
-              </span>
+        {!tab.includes("settings") && (
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-[#e5e2da] pb-5">
+            <div className="min-w-0">
+              <h1 className="break-words text-[26px] font-bold leading-[32px] text-nbc-navy sm:text-[32px] sm:leading-[38px]">
+                {profile.fullName}
+              </h1>
+              <p className="mt-1 text-[13px] text-[#565656] sm:text-[13.5px]">
+                {profile.businessNumber ?? "Corporate Operating Profile"} · {profile.branchName}
+              </p>
             </div>
-            <div>
-              <span className="block text-[12px] text-[#565656]">Available credit facilities</span>
-              <span className="text-[18px] font-bold tabular-nums text-[#121212] sm:text-[20px]">
-                {formatMoney(summary.availableCredit)}
-              </span>
+            <div className="grid w-full grid-cols-2 gap-4 sm:flex sm:w-auto sm:gap-6 sm:text-right">
+              <div>
+                <span className="block text-[12px] text-[#565656]">Consolidated liquidity (CAD eq.)</span>
+                <span className="text-[18px] font-bold tabular-nums text-nbc-navy sm:text-[20px]">
+                  {formatMoney(summary.totalLiquidityCad)}
+                </span>
+              </div>
+              <div>
+                <span className="block text-[12px] text-[#565656]">Available credit facilities</span>
+                <span className="text-[18px] font-bold tabular-nums text-[#121212] sm:text-[20px]">
+                  {formatMoney(summary.availableCredit)}
+                </span>
+              </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {tab === "settings" && (
+          <div className="grid gap-6 lg:grid-cols-12">
+            <div className="space-y-6 lg:col-span-7">
+              <div>
+                <h1 className="text-[28px] font-bold text-nbc-navy">Profile and security</h1>
+                <p className="mt-1 text-[14px] text-[#565656]">
+                  Signed in as <span className="font-semibold text-[#121212]">{profile.fullName}</span> · {profile.email}
+                </p>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget as HTMLFormElement;
+                  const data = new FormData(form);
+                  const get = (key: string) => String(data.get(key) ?? "").trim();
+                  onUpdateProfile((prev) => ({
+                    ...prev,
+                    fullName: get("fullName") || prev.fullName,
+                    phone: get("phone") || prev.phone,
+                    address: get("address") || prev.address,
+                    city: get("city") || prev.city,
+                    province: get("province") || prev.province,
+                    postalCode: get("postalCode") || prev.postalCode,
+                    branchName: get("branchName") || prev.branchName,
+                  }));
+                  notify("Your business profile has been updated.");
+                }}
+                className="space-y-4 rounded-[6px] border border-[#e5e2da] bg-white p-6"
+              >
+                <h2 className="text-[19px] font-bold text-nbc-navy">Business contact details</h2>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block sm:col-span-2">
+                    <span className="mb-1 block text-[12.5px] font-semibold text-[#121212]">Full name</span>
+                    <input
+                      name="fullName"
+                      defaultValue={profile.fullName}
+                      className="w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2 text-[14px] text-[#121212]"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[12.5px] font-semibold text-[#121212]">Business phone</span>
+                    <input
+                      name="phone"
+                      defaultValue={profile.phone ?? ""}
+                      placeholder="416-555-0148"
+                      className="w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2 text-[14px] text-[#121212]"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[12.5px] font-semibold text-[#121212]">Primary branch</span>
+                    <input
+                      name="branchName"
+                      defaultValue={profile.branchName}
+                      className="w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2 text-[14px] text-[#121212]"
+                    />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="mb-1 block text-[12.5px] font-semibold text-[#121212]">Street address</span>
+                    <input
+                      name="address"
+                      defaultValue={profile.address ?? ""}
+                      className="w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2 text-[14px] text-[#121212]"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[12.5px] font-semibold text-[#121212]">City</span>
+                    <input
+                      name="city"
+                      defaultValue={profile.city ?? ""}
+                      className="w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2 text-[14px] text-[#121212]"
+                    />
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block">
+                      <span className="mb-1 block text-[12.5px] font-semibold text-[#121212]">Province</span>
+                      <select
+                        name="province"
+                        defaultValue={profile.province ?? "ON"}
+                        className="w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2 text-[14px] text-nbc-navy"
+                      >
+                        {[
+                          "QC",
+                          "ON",
+                          "BC",
+                          "AB",
+                          "MB",
+                          "SK",
+                          "NS",
+                          "NB",
+                          "NL",
+                          "PE",
+                        ].map((p) => (
+                          <option key={p}>{p}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[12.5px] font-semibold text-[#121212]">Postal code</span>
+                      <input
+                        name="postalCode"
+                        defaultValue={profile.postalCode ?? ""}
+                        placeholder="M5H 1J9"
+                        className="w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2 text-[14px] text-[#121212]"
+                      />
+                    </label>
+                  </div>
+                </div>
+                <button type="submit" className="nbc-btn nbc-btn-primary">
+                  Save profile
+                </button>
+              </form>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget as HTMLFormElement;
+                  const data = new FormData(form);
+                  const current = String(data.get("current") ?? "");
+                  const next = String(data.get("next") ?? "");
+                  const confirm = String(data.get("confirm") ?? "");
+
+                  if (profile.password && current !== profile.password) {
+                    notify("Your current password is incorrect.");
+                    return;
+                  }
+                  if (next.length < 4) {
+                    notify("Choose a new password of at least 4 characters.");
+                    return;
+                  }
+                  if (next !== confirm) {
+                    notify("The new passwords do not match.");
+                    return;
+                  }
+
+                  onUpdateProfile((prev) => ({ ...prev, password: next }));
+                  notify("Your password has been updated.");
+                  form.reset();
+                }}
+                className="space-y-4 rounded-[6px] border border-[#e5e2da] bg-white p-6"
+              >
+                <h2 className="text-[19px] font-bold text-nbc-navy">Change your password</h2>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {[
+                    { name: "current", label: "Current password", placeholder: "••••••••" },
+                    { name: "next", label: "New password", placeholder: "Minimum 4 characters" },
+                    { name: "confirm", label: "Confirm new password", placeholder: "Repeat password" },
+                  ].map((field) => (
+                    <label key={field.name} className="block">
+                      <span className="mb-1 block text-[12.5px] font-semibold text-[#121212]">{field.label}</span>
+                      <input
+                        name={field.name}
+                        type="password"
+                        placeholder={field.placeholder}
+                        autoComplete="new-password"
+                        className="w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2 text-[14px] text-[#121212]"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <button type="submit" className="nbc-btn nbc-btn-ghost">
+                  Update password
+                </button>
+              </form>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget as HTMLFormElement;
+                  const data = new FormData(form);
+                  const current = String(data.get("currentPin") ?? "").replace(/\D/g, "");
+                  const next = String(data.get("nextPin") ?? "").replace(/\D/g, "");
+                  const confirm = String(data.get("confirmPin") ?? "").replace(/\D/g, "");
+
+                  if (profile.pin && current !== profile.pin) {
+                    notify("Your current security PIN is incorrect.");
+                    return;
+                  }
+                  if (!/^\d{4}$/.test(next)) {
+                    notify("Choose a 4-digit PIN.");
+                    return;
+                  }
+                  if (next !== confirm) {
+                    notify("The new PINs do not match.");
+                    return;
+                  }
+
+                  onUpdateProfile((prev) => ({ ...prev, pin: next }));
+                  notify("Your security PIN has been updated.");
+                  form.reset();
+                }}
+                className="space-y-4 rounded-[6px] border border-[#e5e2da] bg-white p-6"
+              >
+                <h2 className="text-[19px] font-bold text-nbc-navy">Change your security PIN</h2>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {[
+                    { name: "currentPin", label: "Current PIN", placeholder: "1234" },
+                    { name: "nextPin", label: "New PIN", placeholder: "4 digits" },
+                    { name: "confirmPin", label: "Confirm PIN", placeholder: "Repeat PIN" },
+                  ].map((field) => (
+                    <label key={field.name} className="block">
+                      <span className="mb-1 block text-[12.5px] font-semibold text-[#121212]">{field.label}</span>
+                      <input
+                        name={field.name}
+                        type="password"
+                        inputMode="numeric"
+                        maxLength={4}
+                        placeholder={field.placeholder}
+                        autoComplete="one-time-code"
+                        className="w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2 text-[14px] text-[#121212]"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <button type="submit" className="nbc-btn nbc-btn-ghost">
+                  Update PIN
+                </button>
+              </form>
+            </div>
+
+            <div className="space-y-5 lg:col-span-5">
+              <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5">
+                <h2 className="text-[17px] font-bold text-nbc-navy">Security preferences</h2>
+                <p className="mt-1 text-[13px] text-[#565656]">
+                  Choose how we confirm it is really you when you sign in.
+                </p>
+                <div className="mt-3 divide-y divide-[#efefef] text-[13.5px]">
+                  {(
+                    [
+                      ["emailNotifications", "Email notifications", "Alerts sent to " + profile.email],
+                      ["loginAlerts", "Login alerts", "Notify me when my account is accessed"],
+                      ["largeTransactionAlerts", "Large transaction alerts", "Notify me for debits over $500"],
+                      ["newPayeeAlerts", "New payee alerts", "Confirm before paying a new biller"],
+                    ] as [keyof typeof DEFAULT_PREFERENCES, string, string][]
+                  ).map(([key, label, desc]) => {
+                    const enabled = (profile.preferences ?? DEFAULT_PREFERENCES)[key];
+                    return (
+                      <div key={key} className="flex items-start justify-between gap-3 py-2.5">
+                        <span>
+                          <span className="block font-medium text-[#333]">{label}</span>
+                          <span className="block text-[11.5px] text-[#777]">{desc}</span>
+                        </span>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={Boolean(enabled)}
+                          aria-label={label}
+                          onClick={() =>
+                            onUpdateProfile((prev) => ({
+                              ...prev,
+                              preferences: {
+                                ...DEFAULT_PREFERENCES,
+                                ...(prev.preferences ?? {}),
+                                [key]: !Boolean(enabled),
+                              },
+                            }))
+                          }
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${enabled ? "bg-nbc-red" : "bg-[#d7d4ce]"}`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${enabled ? "translate-x-6" : "translate-x-1"}`}
+                          />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5">
+                <h2 className="text-[17px] font-bold text-nbc-navy">Access details</h2>
+                <ul className="mt-3 space-y-3 text-[13.5px] text-[#565656]">
+                  <li className="flex items-center justify-between gap-3 border-b border-[#efefef] pb-2">
+                    <span>Account type</span>
+                    <span className="font-semibold text-[#121212]">Business banking</span>
+                  </li>
+                  <li className="flex items-center justify-between gap-3 border-b border-[#efefef] pb-2">
+                    <span>Business number</span>
+                    <span className="font-semibold text-[#121212]">{profile.businessNumber ?? "Not provided"}</span>
+                  </li>
+                  <li className="flex items-center justify-between gap-3">
+                    <span>Last sign-in</span>
+                    <span className="font-semibold text-[#121212]">{profile.lastLogin ?? "First sign-in on this device"}</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* TAB 1: COMMERCIAL CASH POSITION (Distinct Corporate Treasury Table Layout) */}
         {tab === "treasury" && (

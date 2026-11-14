@@ -204,16 +204,16 @@ export const ADMIN_ACTOR = "Administration";
 export const PROVINCES = ["QC", "ON", "BC", "AB", "MB", "SK", "NS", "NB", "NL", "PE"];
 
 export const BRANCHES = [
-  "Place Ville Marie — Montreal, QC",
-  "King Street West — Toronto, ON",
-  "Laurier Boulevard — Quebec City, QC",
-  "Sparks Street — Ottawa, ON",
-  "Burrard Street — Vancouver, BC",
-  "Stephen Avenue — Calgary, AB",
-  "Portage Avenue — Winnipeg, MB",
-  "Barrington Street — Halifax, NS",
-  "Commercial Centre — Saint-Laurent, QC",
-  "Private Banking 1859 — Montreal Downtown",
+  "Place Ville Marie, Montreal, QC",
+  "King Street West, Toronto, ON",
+  "Laurier Boulevard, Quebec City, QC",
+  "Sparks Street, Ottawa, ON",
+  "Burrard Street, Vancouver, BC",
+  "Stephen Avenue, Calgary, AB",
+  "Portage Avenue, Winnipeg, MB",
+  "Barrington Street, Halifax, NS",
+  "Commercial Centre, Saint-Laurent, QC",
+  "Private Banking 1859, Montreal Downtown",
 ];
 
 export const ADVISORS = [

@@ -260,7 +260,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
     email: "alex.tremblay@videotron.ca",
     pin: "7935",
     memberSince: "2018",
-    branchName: "Place Ville Marie — Montreal, QC",
+    branchName: "Place Ville Marie, Montreal, QC",
     advisorName: "Sophie Gagnon, Financial Advisor",
     accounts: [
       {
@@ -552,7 +552,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
     email: "comptabilite@ateliernord.ca",
     pin: "2486",
     memberSince: "2020",
-    branchName: "Commercial Centre — Saint-Laurent, QC",
+    branchName: "Commercial Centre, Saint-Laurent, QC",
     advisorName: "David Chen, Senior Commercial Account Manager",
     businessNumber: "BN 84920-1142 RC0001 · NEQ 1176482901",
     accounts: [
@@ -734,7 +734,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
     email: "claire.beaumont@sympatico.ca",
     pin: "6194",
     memberSince: "2012",
-    branchName: "Private Banking 1859 — Montreal Downtown",
+    branchName: "Private Banking 1859, Montreal Downtown",
     advisorName: "Jean-François Mercier, Private Banker",
     accounts: [
       {

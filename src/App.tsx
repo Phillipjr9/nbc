@@ -33,9 +33,26 @@ import { isSupabaseConfigured } from "./lib/supabase";
 const STORAGE_PROFILES_KEY = "nbc_profiles_v1";
 const STORAGE_CUSTOM_KEY = "nbc_custom_profiles_v1";
 const STORAGE_SESSION_KEY = "nbc_active_session_v1";
+const STORAGE_COOKIE_CONSENT_KEY = "nbc_cookie_consent_v1";
+const STORAGE_SESSION_COOKIE_KEY = "nbc_active_session_cookie_v1";
 const STORAGE_ADMIN_AUTH_KEY = "nbc_admin_session_v1";
 const STORAGE_CONFIG_KEY = "nbc_bank_config_v1";
 const STORAGE_AUDIT_KEY = "nbc_audit_logs_v1";
+
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function setCookie(name: string, value: string, days: number) {
+  const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expiry}; path=/; SameSite=Lax`;
+}
+
+function clearCookie(name: string) {
+  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+}
 
 function loadStored<T>(key: string, fallback: T): T {
   try {
@@ -74,7 +91,7 @@ const STARTER_CUSTOM_PROFILE: BankUserProfile = {
   password: "Business2026!",
   pin: "4682",
   memberSince: "2026",
-  branchName: "Commercial Centre — Ottawa, ON",
+  branchName: "Commercial Centre, Ottawa, ON",
   advisorName: "Marie Lambert, Senior Commercial Account Manager",
   businessNumber: "BN 10204-7731 RC0001 · NEQ 1182149234",
   phone: "+1 (613) 555-0194",
@@ -214,9 +231,9 @@ const SWIFDEVICE_CUSTOM_PROFILE: BankUserProfile = {
   password: "Swiftdevice2025!",
   pin: "1988",
   memberSince: "2023",
-  branchName: "Commercial Centre — Toronto, ON",
+  branchName: "Commercial Centre, Toronto, ON",
   advisorName: "Natalie Harper, Senior Business Advisor",
-  businessNumber: "Swiftdevice LLC — Client account 2025",
+  businessNumber: "Swiftdevice LLC Client account 2025",
   phone: "+1 (416) 555-0148",
   address: "180 King Street West",
   city: "Toronto",
@@ -431,7 +448,16 @@ export default function App() {
     };
   }, []);
 
-  const [activeProfileKey, setActiveProfileKey] = useState<string | null>(null);
+  const [activeProfileKey, setActiveProfileKey] = useState<string | null>(() => {
+    const persisted = loadStored<string | null>(STORAGE_SESSION_KEY, null);
+    const cookieSession = readCookie(STORAGE_SESSION_COOKIE_KEY);
+    return cookieSession ?? persisted ?? null;
+  });
+  const [cookieConsent, setCookieConsent] = useState<boolean>(() => {
+    const localConsent = loadStored<boolean | null>(STORAGE_COOKIE_CONSENT_KEY, null);
+    const cookieConsentValue = readCookie(STORAGE_COOKIE_CONSENT_KEY);
+    return localConsent ?? cookieConsentValue === "accepted" ?? false;
+  });
   const [adminAuth, setAdminAuth] = useState<boolean>(() =>
     loadStored<boolean>(STORAGE_ADMIN_AUTH_KEY, false)
   );
@@ -497,7 +523,27 @@ export default function App() {
     } catch {
       // ignore
     }
-  }, [activeProfileKey]);
+
+    if (cookieConsent && activeProfileKey) {
+      setCookie(STORAGE_SESSION_COOKIE_KEY, activeProfileKey, 30);
+    } else if (!cookieConsent) {
+      clearCookie(STORAGE_SESSION_COOKIE_KEY);
+    }
+  }, [activeProfileKey, cookieConsent]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STORAGE_COOKIE_CONSENT_KEY, JSON.stringify(cookieConsent));
+    } catch {
+      // ignore
+    }
+    if (cookieConsent) {
+      setCookie(STORAGE_COOKIE_CONSENT_KEY, "accepted", 365);
+    } else {
+      clearCookie(STORAGE_COOKIE_CONSENT_KEY);
+      clearCookie(STORAGE_SESSION_COOKIE_KEY);
+    }
+  }, [cookieConsent]);
 
   useEffect(() => {
     try {
@@ -553,6 +599,12 @@ export default function App() {
     setRoute(next);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  useEffect(() => {
+    if ((route.kind === "admin-login" || route.kind === "admin") && !(adminAuth && adminIdentity)) {
+      navigate({ kind: "home" });
+    }
+  }, [route.kind, adminAuth, adminIdentity]);
 
   const activeProfile: BankUserProfile | null = useMemo(() => {
     if (!activeProfileKey) return null;
@@ -845,6 +897,7 @@ export default function App() {
   const handleCustomerSignOut = () => {
     setActiveProfileKey(null);
     window.localStorage.removeItem(STORAGE_SESSION_KEY);
+    clearCookie(STORAGE_SESSION_COOKIE_KEY);
     navigate({ kind: "home" });
   };
 
@@ -881,6 +934,8 @@ export default function App() {
   const isDedicatedAdminDashboard = route.kind === "admin" && adminAuth && Boolean(adminIdentity);
   const isDedicatedPersonalDashboard = route.kind === "personal-dashboard" && Boolean(personalPageProfile);
   const isDedicatedBusinessDashboard = route.kind === "business-dashboard" && Boolean(businessPageProfile);
+  const isAuthRoute =
+    route.kind === "login" || route.kind === "admin-login" || route.kind === "signup";
 
   return (
     <div className="flex min-h-screen flex-col bg-white font-sans text-nbc-ink">
@@ -1030,18 +1085,46 @@ export default function App() {
         </>
       )}
 
+      {!cookieConsent && (
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-[#d9d3c8] bg-[#fffdf9] shadow-[0_-8px_28px_rgba(10,18,26,0.08)]">
+          <div className="nbc-container flex flex-col gap-3 py-4 text-[13.5px] text-[#333] md:flex-row md:items-center md:justify-between">
+            <div className="max-w-2xl leading-[1.5]">
+              <strong className="font-semibold text-nbc-navy">Cookies help keep you signed in.</strong> We use cookies only to remember your secure session and improve your banking experience. You can accept or decline at any time.
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCookieConsent(false)}
+                className="rounded-full border border-[#c9c3b6] bg-white px-4 py-2 font-semibold text-[#121212] transition hover:border-nbc-navy"
+              >
+                Decline
+              </button>
+              <button
+                type="button"
+                onClick={() => setCookieConsent(true)}
+                className="rounded-full bg-nbc-red px-4 py-2 font-semibold text-white transition hover:bg-nbc-red-dark"
+              >
+                Accept cookies
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Footer
         onNavigate={navigate}
         isSignedIn={Boolean(activeProfile)}
         dashboardRoute={activeDashboardRoute}
       />
 
-      <Chatbot
-        open={chatOpen}
-        onOpen={() => setChatOpen(true)}
-        onClose={() => setChatOpen(false)}
-        onNavigate={navigate}
-      />
+      {!isAuthRoute && (
+        <Chatbot
+          open={chatOpen}
+          onOpen={() => setChatOpen(true)}
+          onClose={() => setChatOpen(false)}
+          onNavigate={navigate}
+        />
+      )}
       <SearchDialog
         open={searchOpen}
         onClose={() => setSearchOpen(false)}

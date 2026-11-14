@@ -186,15 +186,6 @@ export default function Footer({
                 {link.label}
               </button>
             ))}
-            <span className="text-[#c5c5c5]" aria-hidden>|</span>
-            <button
-              type="button"
-              onClick={() => onNavigate({ kind: "admin-login" })}
-              className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-nbc-navy transition hover:text-nbc-red hover:underline"
-            >
-              <LockIcon className="h-3 w-3" />
-              Administration
-            </button>
           </div>
           <button
             type="button"
