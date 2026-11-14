@@ -24,7 +24,7 @@ export type PageRoute =
         | "rates";
     }
   | { kind: "personal-dashboard" }
-  | { kind: "business-dashboard" }
+  | { kind: "business-dashboard"; tab?: "cash-position" }
   | { kind: "admin-login" }
   | { kind: "admin" };
 

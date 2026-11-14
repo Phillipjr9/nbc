@@ -11,7 +11,7 @@ export function routeToHash(route: PageRoute): string {
     case "personal-dashboard":
       return "#/dashboard";
     case "business-dashboard":
-      return "#/dashboard/business";
+      return route.tab === "cash-position" ? "#/dashboard/business?tab=cash-position" : "#/dashboard/business";
     case "admin-login":
       return "#/admin-login";
     case "admin":
@@ -28,8 +28,13 @@ export function routeToHash(route: PageRoute): string {
 export function hashToRoute(hash: string): PageRoute {
   const clean = hash.replace(/^#\/?/, "").trim().toLowerCase();
   if (!clean) return { kind: "home" };
-  if (clean === "dashboard" || clean === "dashboard/personal") return { kind: "personal-dashboard" };
-  if (clean === "dashboard/business") return { kind: "business-dashboard" };
+  const [pathPart, queryString = ""] = clean.split("?");
+  const params = new URLSearchParams(queryString);
+
+  if (pathPart === "dashboard" || pathPart === "dashboard/personal") return { kind: "personal-dashboard" };
+  if (pathPart === "dashboard/business") {
+    return params.get("tab") === "cash-position" ? { kind: "business-dashboard", tab: "cash-position" } : { kind: "business-dashboard" };
+  }
   if (clean === "personal-banking") return { kind: "personal-dashboard" };
   if (clean === "business-banking") return { kind: "business-dashboard" };
   if (clean === "admin-login") return { kind: "admin-login" };

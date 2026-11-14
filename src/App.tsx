@@ -6,6 +6,7 @@ import {
   INITIAL_BANK_CONFIG,
   INITIAL_PROFILES,
   PageRoute,
+  Transaction,
 } from "./banking/bankingTypes";
 import {
   AdminIdentity,
@@ -82,42 +83,8 @@ const STARTER_CUSTOM_PROFILE: BankUserProfile = {
   lastLogin: "Just now",
 };
 
-const SWIFTDEVICE_TRANSACTION_TEMPLATES = [
-  { day: 2, accountId: "swift-chk", description: "Northstar Retail Group — equipment invoice", category: "Income", amount: 21850.41 },
-  { day: 4, accountId: "swift-chk", description: "Toronto office lease payment", category: "Business", amount: -6825.41 },
-  { day: 7, accountId: "swift-chk", description: "Mira Supply Chain — component restock", category: "Business", amount: -5428.35 },
-  { day: 9, accountId: "swift-chk", description: "Harborline Logistics — Q1 settlement", category: "Income", amount: 16342.72 },
-  { day: 12, accountId: "swift-chk", description: "Payroll run — operations and field techs", category: "Business", amount: -18420.9 },
-  { day: 14, accountId: "swift-chk", description: "Borealtech Supply — service rebate", category: "Income", amount: 12640.18 },
-  { day: 16, accountId: "swift-chk", description: "Government tax remittance — HST", category: "Business", amount: -9156.48 },
-  { day: 18, accountId: "swift-chk", description: "PeakWorks Distribution — settlement", category: "Income", amount: 24190.12 },
-  { day: 20, accountId: "swift-chk", description: "Apex Retail Solutions — maintenance", category: "Business", amount: -1890.37 },
-  { day: 23, accountId: "swift-chk", description: "Aurora Fleet Systems — hardware purchase", category: "Income", amount: 32840.24 },
-  { day: 25, accountId: "swift-chk", description: "Commercial insurance premium", category: "Business", amount: -7815.33 },
-  { day: 27, accountId: "swift-chk", description: "Summit Retail Group — international sales wire", category: "Income", amount: 47120.59 },
-  { day: 3, accountId: "swift-chk", description: "Edgewave Components — freight credit", category: "Transfer", amount: 10835.45 },
-  { day: 6, accountId: "swift-chk", description: "Meridian Energy Co. — installation invoice", category: "Income", amount: 25120.71 },
-  { day: 10, accountId: "swift-chk", description: "Biweekly payroll — customer support team", category: "Business", amount: -21980.56 },
-  { day: 13, accountId: "swift-chk", description: "Northfield Medical — resale advance", category: "Income", amount: 4850.12 },
-  { day: 17, accountId: "swift-chk", description: "CIBC commercial line — interest adjustment", category: "Business", amount: -6234.11 },
-  { day: 19, accountId: "swift-chk", description: "Atlantic Distribution — inventory settlement", category: "Income", amount: 31985.92 },
-  { day: 21, accountId: "swift-chk", description: "Transit operations — courier and freight", category: "Business", amount: -20545.63 },
-  { day: 24, accountId: "swift-chk", description: "Redline Ventures — U.S. settlement", category: "Income", amount: 44990.68 },
-  { day: 26, accountId: "swift-chk", description: "Supplier credit — component exchange", category: "Transfer", amount: 3241.18 },
-  { day: 28, accountId: "swift-chk", description: "Payroll run — regional distribution staff", category: "Business", amount: -4821.9 },
-  { day: 2, accountId: "swift-chk", description: "Northshore Health Services — service contract", category: "Income", amount: 36580.4 },
-  { day: 5, accountId: "swift-chk", description: "Enterprise security upgrade — managed service", category: "Business", amount: -12450.16 },
-  { day: 8, accountId: "swift-chk", description: "BrightLine Commerce — rollout payment", category: "Income", amount: 16990.28 },
-  { day: 11, accountId: "swift-usd", description: "Redline Ventures — cross-border settlement", category: "Income", amount: 28425.55 },
-  { day: 15, accountId: "swift-chk", description: "Nova Logistics — shipment milestone", category: "Income", amount: 39210.48 },
-  { day: 18, accountId: "swift-chk", description: "Software licensing renewal", category: "Business", amount: -9140.85 },
-  { day: 22, accountId: "swift-chk", description: "Atlas Mobility — device deployment payment", category: "Income", amount: 47980.14 },
-  { day: 26, accountId: "swift-chk", description: "Payroll run — sales and finance teams", category: "Business", amount: -26300.75 },
-  { day: 29, accountId: "swift-chk", description: "Ironwood Tech — distribution settlement", category: "Income", amount: 55290.18 },
-];
-
-const createSwiftdeviceTransactions = () => {
-  const entries: Array<{ id: string; accountId: string; date: string; description: string; category: string; amount: number; balanceAfter?: number; status: string }> = [];
+const createSwiftdeviceTransactions = (): Transaction[] => {
+  const entries: Transaction[] = [];
   const startDate = new Date("2024-02-02T00:00:00");
   const endDate = new Date();
 
@@ -556,7 +523,7 @@ export default function App() {
 
   const activeDashboardRoute: PageRoute = useMemo(() => {
     if (activeProfile && isBusinessProfile(activeProfile)) {
-      return { kind: "business-dashboard" };
+      return { kind: "business-dashboard", tab: "cash-position" };
     }
     return { kind: "personal-dashboard" };
   }, [activeProfile]);
@@ -598,7 +565,11 @@ export default function App() {
   };
 
   const openDashboardForProfile = (profile: BankUserProfile) => {
-    navigate(isBusinessProfile(profile) ? { kind: "business-dashboard" } : { kind: "personal-dashboard" });
+    navigate(
+      isBusinessProfile(profile)
+        ? { kind: "business-dashboard", tab: "cash-position" }
+        : { kind: "personal-dashboard" }
+    );
   };
 
   /** Processes any scheduled transfers that have come due for a profile. */
@@ -914,6 +885,7 @@ export default function App() {
       ) : isDedicatedBusinessDashboard && businessPageProfile ? (
         <BusinessDashboard
           profile={businessPageProfile}
+          initialTab="treasury"
           onUpdateProfile={handleUpdateActiveProfile}
           onGoPublicSite={() => navigate({ kind: "home" })}
           onGoHelp={() => navigate({ kind: "support", section: "appointment" })}

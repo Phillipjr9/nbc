@@ -13,7 +13,7 @@ import {
   formatMoney,
   FX_RATES,
 } from "../banking/bankingTypes";
-import { downloadFile, round2, statementCsv } from "../banking/adminOps";
+import { round2 } from "../banking/adminOps";
 import BankCardVisual from "./BankCardVisual";
 import { ArrowRight, HelpIcon, LockIcon, SearchIcon } from "./icons";
 import TransactionSendOverlay, {
@@ -25,6 +25,7 @@ type BizTab = "treasury" | "payroll" | "invoices" | "wires" | "cards" | "ledger"
 
 type Props = {
   profile: BankUserProfile;
+  initialTab?: BizTab;
   onUpdateProfile: (updater: (prev: BankUserProfile) => BankUserProfile) => void;
   onGoPublicSite: () => void;
   onGoHelp: () => void;
@@ -61,12 +62,13 @@ const EXTERNAL_TRANSFER_COUNTRIES = [
 
 export default function BusinessDashboard({
   profile,
+  initialTab = "treasury",
   onUpdateProfile,
   onGoPublicSite,
   onGoHelp,
   onSignOut,
 }: Props) {
-  const [tab, setTab] = useState<BizTab>("treasury");
+  const [tab, setTab] = useState<BizTab>(initialTab);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -82,7 +84,6 @@ export default function BusinessDashboard({
   );
   const [activityPage, setActivityPage] = useState(0);
   const ACTIVITY_PAGE_SIZE = 6;
-  const orderedAccounts = useMemo(() => [...profile.accounts], [profile.accounts]);
   const sortedTransactions = useMemo(
     () => [...profile.transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
     [profile.transactions]
@@ -125,8 +126,6 @@ export default function BusinessDashboard({
     () => accountDetailTransactions.slice(safeActivityPage * ACTIVITY_PAGE_SIZE, (safeActivityPage + 1) * ACTIVITY_PAGE_SIZE),
     [accountDetailTransactions, safeActivityPage]
   );
-  const currentAccountIndex = accountDetail ? orderedAccounts.findIndex((a) => a.id === accountDetail.id) : -1;
-
   // Payroll form
   const [newEmpName, setNewEmpName] = useState("");
   const [newEmpRole, setNewEmpRole] = useState("");
@@ -200,22 +199,6 @@ export default function BusinessDashboard({
 
   const openAccountDetail = (accountId: string) => {
     setAccountDetailId(accountId);
-    setSelectedTxId(null);
-    setActivityPage(0);
-    setTab("account");
-  };
-
-  const navigateAccountDetail = (direction: -1 | 1) => {
-    if (orderedAccounts.length === 0) return;
-    if (currentAccountIndex === -1) {
-      setAccountDetailId(orderedAccounts[0].id);
-      setActivityPage(0);
-      setTab("account");
-      return;
-    }
-
-    const nextIndex = (currentAccountIndex + direction + orderedAccounts.length) % orderedAccounts.length;
-    setAccountDetailId(orderedAccounts[nextIndex].id);
     setSelectedTxId(null);
     setActivityPage(0);
     setTab("account");
@@ -2176,7 +2159,7 @@ export default function BusinessDashboard({
                       <strong>{formatMoney(accountDetail.limit, accountDetail.currency)}</strong>
                     </div>
                   )}
-                  {accountDetailMeta?.remainingAvailable !== null && (
+                  {accountDetailMeta && typeof accountDetailMeta.remainingAvailable === "number" && (
                     <div className="flex items-center justify-between border-b border-[#efefef] pb-2">
                       <span>Available to draw</span>
                       <strong>{formatMoney(accountDetailMeta.remainingAvailable, accountDetail.currency)}</strong>
