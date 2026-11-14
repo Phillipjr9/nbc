@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { logoNbc } from "../assets/nbcAssets";
 import {
   AdminOps,
@@ -83,6 +83,11 @@ export default function AdminDashboard({
   onSignOut,
 }: Props) {
   const [tab, setTab] = useState<AdminTabId | "analytics" | "search" | "roles">("overview");
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [tab]);
+
   const [selectedKey, setSelectedKey] = useState(users[0]?.key ?? "personal");
   const [toast, setToast] = useState<string | null>(null);
   const [createRequest, setCreateRequest] = useState(0);

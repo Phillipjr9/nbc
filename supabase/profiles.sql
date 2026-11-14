@@ -31,7 +31,7 @@ before update on public.profiles
 for each row
 execute function public.update_profiles_updated_at();
 
--- Example row for a demo user:
+-- Example row for a sample user:
 -- insert into public.profiles (email, full_name, role_label, account_kind, member_since, branch_name, advisor_name, profile_data)
 -- values (
 --   'alex.tremblay@videotron.ca',

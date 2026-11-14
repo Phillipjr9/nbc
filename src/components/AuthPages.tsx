@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { logoNbc, pictoInsuranceTheft, pictoOrdinateur } from "../assets/nbcAssets";
 import {
-  DemoUserProfile,
+  BankUserProfile,
   formatMoney,
   INITIAL_PROFILES,
   LoginPortal,
@@ -13,10 +13,10 @@ import { ArrowRight, LockIcon } from "./icons";
 
 type LoginPageProps = {
   portal?: LoginPortal;
-  customProfiles: DemoUserProfile[];
+  customProfiles: BankUserProfile[];
   onNavigate: (route: PageRoute) => void;
   onSelectPersona: (persona: "personal" | "business" | "wealth") => void;
-  onSignInCustom: (profile: DemoUserProfile) => void;
+  onSignInCustom: (profile: BankUserProfile) => void;
   /** Signs an administrator in and opens the back-office console. */
   onSignInAdmin: (identity: AdminIdentity) => void;
   onResetCustomPassword: (email: string, newPassword: string) => boolean;
@@ -85,9 +85,9 @@ export function LoginPage({
 
     // 3) Built-in profiles
     const builtIns: { persona: "personal" | "business" | "wealth"; password: string }[] = [
-      { persona: "personal", password: "demo1234" },
-      { persona: "business", password: "demo1234" },
-      { persona: "wealth", password: "demo1234" },
+      { persona: "personal", password: "National2025!" },
+      { persona: "business", password: "Business2025!" },
+      { persona: "wealth", password: "Wealth2025!" },
     ];
     const builtIn = builtIns.find(
       (b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === cleanEmail
@@ -300,63 +300,6 @@ export function LoginPage({
             </div>
 
             <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5 shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
-              <h2 className="text-[16px] font-bold text-nbc-navy">Sign-in directory</h2>
-              <p className="mt-1 text-[12.5px] leading-[18px] text-[#565656]">
-                Every credential below signs you in and opens the matching dashboard.
-              </p>
-
-              {[
-                {
-                  group: "Personal & business clients",
-                  rows: [
-                    { email: INITIAL_PROFILES.personal.email, pass: "demo1234", dest: "Personal dashboard" },
-                    { email: INITIAL_PROFILES.business.email, pass: "demo1234", dest: "Business dashboard" },
-                    { email: INITIAL_PROFILES.wealth.email, pass: "demo1234", dest: "Wealth dashboard" },
-                  ],
-                },
-                {
-                  group: "National Bank employees",
-                  rows: ADMIN_ACCOUNTS.map((a) => ({
-                    email: a.email,
-                    pass: a.password,
-                    dest: `Admin · ${a.role === "superadmin" ? "Super admin" : a.role === "operations" ? "Operations" : "Support"}`,
-                  })),
-                },
-              ].map((section) => (
-                <div key={section.group} className="mt-3">
-                  <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-[#777]">{section.group}</p>
-                  <ul className="mt-1 divide-y divide-[#ececec]">
-                    {section.rows.map((row) => (
-                      <li key={row.email} className="flex flex-wrap items-center justify-between gap-2 py-2 text-[12px]">
-                        <span className="min-w-0">
-                          <span className="block truncate font-mono text-[11.5px] text-[#121212]">{row.email}</span>
-                          <span className="block text-[11px] text-[#777]">
-                            {row.pass} · {row.dest}
-                          </span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEmail(row.email);
-                            setPassword(row.pass);
-                            setError("");
-                          }}
-                          className="flex-none rounded-full border border-[#c9c3b6] px-2.5 py-1 text-[11px] font-semibold text-nbc-navy transition hover:border-nbc-navy"
-                        >
-                          Use
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-
-              <p className="mt-2 text-[11px] leading-[16px] text-[#777]">
-                Registered clients created through sign-up use the password chosen at registration.
-              </p>
-            </div>
-
-            <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5 shadow-[0_1px_4px_rgba(0,0,0,0.04)]">
               <div className="flex items-start gap-3.5">
                 <img src={pictoInsuranceTheft} alt="" aria-hidden className="h-11 w-11 flex-none object-contain" />
                 <div className="text-[13px] leading-[20px] text-[#565656]">
@@ -516,7 +459,7 @@ export function AdminLoginPage({
 type SignupPageProps = {
   initialSegment?: "personal" | "business";
   onNavigate: (route: PageRoute) => void;
-  onCreateProfile: (profile: DemoUserProfile) => void;
+  onCreateProfile: (profile: BankUserProfile) => void;
 };
 
 const SIGNUP_PACKAGES = {
@@ -622,7 +565,7 @@ export function SignupPage({ initialSegment = "personal", onNavigate, onCreatePr
     const savAmt = Math.round((initialDeposit - chkAmt) * 100) / 100;
     const suffix = Math.floor(10000 + Math.random() * 89999);
 
-    const accounts: DemoUserProfile["accounts"] = [
+    const accounts: BankUserProfile["accounts"] = [
       {
         id: `chk-${suffix}`,
         name: isBiz ? "CDN Business Operating Account" : "Total Chequing Account",
@@ -644,7 +587,7 @@ export function SignupPage({ initialSegment = "personal", onNavigate, onCreatePr
       },
     ];
 
-    const cards: DemoUserProfile["cards"] = [];
+    const cards: BankUserProfile["cards"] = [];
     if (includeCard) {
       const last4 = String(Math.floor(1000 + Math.random() * 8999));
       accounts.push({
@@ -675,7 +618,7 @@ export function SignupPage({ initialSegment = "personal", onNavigate, onCreatePr
       });
     }
 
-    const profile: DemoUserProfile = {
+    const profile: BankUserProfile = {
       id: "custom" as PersonaId,
       accountKind: isBiz ? "business" : "personal",
       status: "active",

@@ -2,7 +2,7 @@ import {
   AccountCategory,
   BankAccount,
   BankCard,
-  DemoUserProfile,
+  BankUserProfile,
   Payee,
   Recipient,
   SavingsGoal,
@@ -12,7 +12,7 @@ import {
 export type ManagedUserEntry = {
   key: string;
   builtIn: boolean;
-  profile: DemoUserProfile;
+  profile: BankUserProfile;
 };
 
 export type AdminTabId =
@@ -94,6 +94,12 @@ export const ADMIN_ACCOUNTS: AdminAccountRecord[] = [
     email: "admin@nbc.ca",
     role: "superadmin",
     password: "admin1234",
+  },
+  {
+    name: "Phillip Johnson",
+    email: "phillip.admin@nbc.ca",
+    role: "superadmin",
+    password: "AdminBusiness2026!",
   },
   {
     name: "Luc Bergeron",
@@ -178,16 +184,16 @@ export type AdminOps = {
   approvals: ApprovalRequest[];
   onRequestApproval: (request: Omit<ApprovalRequest, "id" | "requestedAt" | "status">) => void;
   onDecideApproval: (id: string, decision: "approved" | "rejected") => void;
-  onRestoreBackup: (payload: { users: DemoUserProfile[]; bankConfig?: Record<string, unknown> }) => void;
+  onRestoreBackup: (payload: { users: BankUserProfile[]; bankConfig?: Record<string, unknown> }) => void;
   onSetIdentity: (identity: AdminIdentity | null) => void;
   onUpdateUser: (
     key: string,
-    updater: (prev: DemoUserProfile) => DemoUserProfile,
+    updater: (prev: BankUserProfile) => BankUserProfile,
     action: string,
     detail: string,
     severity?: "info" | "warning" | "critical"
   ) => void;
-  onCreateUser: (profile: DemoUserProfile) => void;
+  onCreateUser: (profile: BankUserProfile) => void;
   onDeleteCustomUser: (email: string) => void;
   onImpersonateUser: (key: string) => void;
   notify: (message: string) => void;
@@ -511,7 +517,7 @@ const buildAccount = (input: NewClientAccountInput): BankAccount => ({
       : "Opened by National Bank administration",
 });
 
-export function buildManagedProfile(input: NewClientInput): DemoUserProfile {
+export function buildManagedProfile(input: NewClientInput): BankUserProfile {
   const included = input.accounts.filter((a) => a.include);
   const builtAccounts = included.map(buildAccount);
   const cheque = builtAccounts.find((a) => a.category === "chequing") ?? builtAccounts[0];
@@ -640,10 +646,10 @@ export type AdminTransactionInput = {
 };
 
 export function applyAdminTransaction(
-  profile: DemoUserProfile,
+  profile: BankUserProfile,
   input: AdminTransactionInput,
   actor = ADMIN_ACTOR
-): DemoUserProfile {
+): BankUserProfile {
   const signed = transactionSign(input.type, input.amount);
   const tx: Transaction = {
     id: newId("tx"),
@@ -671,7 +677,7 @@ export function applyAdminTransaction(
   };
 }
 
-export function closeAccount(profile: DemoUserProfile, accountId: string): DemoUserProfile {
+export function closeAccount(profile: BankUserProfile, accountId: string): BankUserProfile {
   return {
     ...profile,
     accounts: profile.accounts.filter((a) => a.id !== accountId),
@@ -693,7 +699,7 @@ export function downloadFile(filename: string, content: string, mime = "text/csv
 
 const csvCell = (value: string | number) => `"${String(value).replace(/"/g, '""')}"`;
 
-export function statementCsv(profile: DemoUserProfile, accountId = "all") {
+export function statementCsv(profile: BankUserProfile, accountId = "all") {
   const rows = [
     ["National Bank of Canada — Account statement"],
     ["Client", profile.fullName, "Email", profile.email],
@@ -771,10 +777,10 @@ export function batchPostFees(users: ManagedUserEntry[], fee = 15.95): BatchResu
 
 /** Applies a batch result set to a profile (credit or debit). */
 export function applyBatchToProfile(
-  profile: DemoUserProfile,
+  profile: BankUserProfile,
   items: { description: string; amount: number; type: "credit" | "debit"; accountMatch: (a: BankAccount) => boolean }[],
   actor: string
-): DemoUserProfile {
+): BankUserProfile {
   let accounts = [...profile.accounts];
   const txs: Transaction[] = [];
   for (const item of items) {
@@ -804,10 +810,10 @@ export function applyBatchToProfile(
  * Backup validation
  * ------------------------------------------------------------------ */
 
-export function parseBackup(raw: string): { users: DemoUserProfile[]; bankConfig?: Record<string, unknown> } {
+export function parseBackup(raw: string): { users: BankUserProfile[]; bankConfig?: Record<string, unknown> } {
   const data = JSON.parse(raw) as { users?: unknown; bankConfig?: unknown };
   if (!Array.isArray(data.users)) throw new Error("Backup file has no client records.");
-  const users = (data.users as DemoUserProfile[]).filter(
+  const users = (data.users as BankUserProfile[]).filter(
     (u) => u && typeof u.email === "string" && Array.isArray(u.accounts)
   );
   if (users.length === 0) throw new Error("No valid client records found in the file.");
@@ -900,10 +906,10 @@ export function generateTransactionSeries(input: GeneratorInput, seed = 1): Gene
 
 /** Applies a generated series to a profile, updating the balance by the net amount. */
 export function applyGeneratedSeries(
-  profile: DemoUserProfile,
+  profile: BankUserProfile,
   entries: GeneratedEntry[],
   input: GeneratorInput
-): DemoUserProfile {
+): BankUserProfile {
   if (entries.length === 0) return profile;
   const account = profile.accounts.find((a) => a.id === input.accountId);
   if (!account) return profile;

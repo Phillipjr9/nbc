@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   logoNbc,
   pictoCarteCreditRed,
@@ -8,7 +8,7 @@ import {
 } from "../assets/nbcAssets";
 import {
   BusinessInvoice,
-  DemoUserProfile,
+  BankUserProfile,
   EmployeePayrollItem,
   formatMoney,
   FX_RATES,
@@ -21,11 +21,11 @@ import TransactionSendOverlay, {
   AnimatedTxPhase,
 } from "./TransactionSendOverlay";
 
-type BizTab = "treasury" | "payroll" | "invoices" | "wires" | "cards" | "ledger";
+type BizTab = "treasury" | "payroll" | "invoices" | "wires" | "cards" | "ledger" | "account";
 
 type Props = {
-  profile: DemoUserProfile;
-  onUpdateProfile: (updater: (prev: DemoUserProfile) => DemoUserProfile) => void;
+  profile: BankUserProfile;
+  onUpdateProfile: (updater: (prev: BankUserProfile) => BankUserProfile) => void;
   onGoPublicSite: () => void;
   onGoHelp: () => void;
   onSignOut: () => void;
@@ -40,6 +40,25 @@ const DEFAULT_INVOICES: BusinessInvoice[] = [
   { id: "inv-d1", invoiceNo: "INV-2060", clientName: "Groupe Boréal Ltée", amount: 12500, currency: "CAD", dueDate: "2026-05-26", status: "Open" },
 ];
 
+const EXTERNAL_TRANSFER_COUNTRIES = [
+  "Canada",
+  "United States",
+  "United Kingdom",
+  "Germany",
+  "France",
+  "Australia",
+  "Singapore",
+  "United Arab Emirates",
+  "Japan",
+  "India",
+  "Mexico",
+  "Brazil",
+  "Sweden",
+  "Belgium",
+  "Hong Kong",
+  "Switzerland",
+];
+
 export default function BusinessDashboard({
   profile,
   onUpdateProfile,
@@ -47,11 +66,66 @@ export default function BusinessDashboard({
   onGoHelp,
   onSignOut,
 }: Props) {
-  const [tab, setTab] = useState<BizTab>("treasury");
+  const [tab, setTab] = useState<BizTab>("account");
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [tab]);
+
   const [toast, setToast] = useState<string | null>(null);
   const [activeAnimatedTx, setActiveAnimatedTx] = useState<AnimatedTxPayload | null>(null);
   const [animatedTxPhase, setAnimatedTxPhase] = useState<AnimatedTxPhase>("verifying");
   const [recentTxIds, setRecentTxIds] = useState<string[]>([]);
+  const [selectedTxId, setSelectedTxId] = useState<string | null>(null);
+  const [accountDetailId, setAccountDetailId] = useState<string | null>(
+    () => profile.accounts.find((account) => account.id === "swift-chk")?.id ?? profile.accounts[0]?.id ?? null
+  );
+  const [activityPage, setActivityPage] = useState(0);
+  const ACTIVITY_PAGE_SIZE = 6;
+  const orderedAccounts = useMemo(() => [...profile.accounts], [profile.accounts]);
+  const sortedTransactions = useMemo(
+    () => [...profile.transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [profile.transactions]
+  );
+  const selectedTx = profile.transactions.find((tx) => tx.id === selectedTxId) ?? null;
+  const selectedTxAccount = selectedTx ? profile.accounts.find((a) => a.id === selectedTx.accountId) : null;
+  const accountDetail = profile.accounts.find((a) => a.id === accountDetailId) ?? null;
+  const accountDetailTransactions = useMemo(
+    () =>
+      accountDetail
+        ? sortedTransactions.filter((tx) => tx.accountId === accountDetail.id)
+        : [],
+    [accountDetail, sortedTransactions]
+  );
+  const accountDetailMeta = useMemo(() => {
+    if (!accountDetail) return null;
+
+    const accountTypeName =
+      accountDetail.category === "chequing"
+        ? "Business chequing"
+        : accountDetail.category === "savings"
+          ? "Treasury reserve"
+          : accountDetail.category === "credit"
+            ? "Business credit line"
+            : "Business account";
+
+    const remainingAvailable =
+      accountDetail.category === "credit" && typeof accountDetail.limit === "number"
+        ? Math.max(accountDetail.limit - (accountDetail.balance ?? 0), 0)
+        : null;
+
+    return {
+      accountTypeName,
+      remainingAvailable,
+    };
+  }, [accountDetail]);
+  const activityPageCount = Math.max(1, Math.ceil(accountDetailTransactions.length / ACTIVITY_PAGE_SIZE));
+  const safeActivityPage = Math.min(activityPage, activityPageCount - 1);
+  const pagedAccountDetailTransactions = useMemo(
+    () => accountDetailTransactions.slice(safeActivityPage * ACTIVITY_PAGE_SIZE, (safeActivityPage + 1) * ACTIVITY_PAGE_SIZE),
+    [accountDetailTransactions, safeActivityPage]
+  );
+  const currentAccountIndex = accountDetail ? orderedAccounts.findIndex((a) => a.id === accountDetail.id) : -1;
 
   // Payroll form
   const [newEmpName, setNewEmpName] = useState("");
@@ -72,9 +146,29 @@ export default function BusinessDashboard({
   );
   const [wireMode, setWireMode] = useState<"wire" | "tax" | "treasury" | "fx">("wire");
   const [wireSrcId, setWireSrcId] = useState(operatingAccounts[0]?.id ?? "");
-  const [wireBeneficiary, setWireBeneficiary] = useState("Studio Bois Franc Inc. — Transit 00061-006");
+  const [wireBeneficiary, setWireBeneficiary] = useState("Studio Bois Franc Inc.");
+  const [wireBankName, setWireBankName] = useState("Bank of Montreal Corporate Treasury");
+  const [wireBankCountry, setWireBankCountry] = useState("United States");
+  const [wireBankSwift, setWireBankSwift] = useState("BOMCUS33");
+  const [wireAccountNumber, setWireAccountNumber] = useState("004112883420");
+  const [wirePurpose, setWirePurpose] = useState("Equipment procurement");
+  const [wireFeeMode, setWireFeeMode] = useState<"OUR" | "BEN" | "SHA">("SHA");
+  const [wireCountry, setWireCountry] = useState("United States");
   const [wireAmt, setWireAmt] = useState("4250.00");
   const [wireFxCurr, setWireFxCurr] = useState<keyof typeof FX_RATES>("USD");
+
+  type PendingTransfer = {
+    kind: "wire" | "tax" | "treasury" | "fx";
+    title: string;
+    summary: string;
+    fromLabel: string;
+    toLabel: string;
+    amount: number;
+    actionLabel: string;
+    onConfirm: () => void;
+  };
+
+  const [pendingTransfer, setPendingTransfer] = useState<PendingTransfer | null>(null);
 
   const [taxPayeeId, setTaxPayeeId] = useState(profile.payees[0]?.id ?? "");
   const [taxAmt, setTaxAmt] = useState("3480.00");
@@ -101,6 +195,89 @@ export default function BusinessDashboard({
   const nowStamp = () =>
     new Date().toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", hour12: true });
   const makeRef = (p: string) => `${p}-${Math.floor(100000 + Math.random() * 900000)}`;
+  const txDisplayAmount = (amount: number, currency: "CAD" | "USD" = "CAD") =>
+    formatMoney(Math.abs(amount), currency);
+
+  const openAccountDetail = (accountId: string) => {
+    setAccountDetailId(accountId);
+    setSelectedTxId(null);
+    setActivityPage(0);
+    setTab("account");
+  };
+
+  const navigateAccountDetail = (direction: -1 | 1) => {
+    if (orderedAccounts.length === 0) return;
+    if (currentAccountIndex === -1) {
+      setAccountDetailId(orderedAccounts[0].id);
+      setActivityPage(0);
+      setTab("account");
+      return;
+    }
+
+    const nextIndex = (currentAccountIndex + direction + orderedAccounts.length) % orderedAccounts.length;
+    setAccountDetailId(orderedAccounts[nextIndex].id);
+    setSelectedTxId(null);
+    setActivityPage(0);
+    setTab("account");
+  };
+
+  const generatePdfStatement = (accountId: string | "all") => {
+    const subjectAccount = accountId === "all" ? null : profile.accounts.find((a) => a.id === accountId) ?? null;
+    const rows = accountId === "all"
+      ? [...profile.transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      : accountDetailTransactions.length
+        ? accountDetailTransactions
+        : profile.transactions
+            .filter((tx) => tx.accountId === accountId)
+            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    const title = subjectAccount ? `${subjectAccount.name} account statement` : "Commercial account statement";
+    const accountLabel = subjectAccount ? `${subjectAccount.name} · ${subjectAccount.number}` : "All corporate accounts";
+    const rowsHtml = rows
+      .map(
+        (tx) => {
+          const acc = profile.accounts.find((a) => a.id === tx.accountId);
+          const dr = tx.amount < 0 ? txDisplayAmount(tx.amount, acc?.currency ?? "CAD") : "—";
+          const cr = tx.amount >= 0 ? txDisplayAmount(tx.amount, acc?.currency ?? "CAD") : "—";
+          return `
+            <tr>
+              <td>${tx.date}</td>
+              <td>${tx.description}</td>
+              <td>${acc?.name ?? tx.accountId}</td>
+              <td>${dr}</td>
+              <td>${cr}</td>
+            </tr>
+          `;
+        }
+      )
+      .join("");
+
+    const win = window.open("", "_blank", "width=1000,height=1200");
+    if (!win) return;
+
+    win.document.write(`<!doctype html><html><head><title>${title}</title><style>
+      body { font-family: Arial, sans-serif; background: #fff; color: #121212; padding: 32px; }
+      h1 { font-size: 28px; margin: 0 0 12px; }
+      .meta { color: #565656; font-size: 13px; margin-bottom: 20px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+      th, td { border-bottom: 1px solid #e7e7e7; padding: 10px 8px; text-align: left; font-size: 12px; }
+      th { background: #faf8f3; color: #565656; text-transform: uppercase; letter-spacing: .08em; }
+      .amount { font-weight: 700; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+      <h1>${title}</h1>
+      <div class="meta">${accountLabel}</div>
+      <div class="meta">Prepared: ${new Date().toLocaleDateString("en-CA")}</div>
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Description</th><th>Account</th><th>Debit</th><th>Credit</th></tr>
+        </thead>
+        <tbody>${rowsHtml || '<tr><td colspan="5">No transactions available.</td></tr>'}</tbody>
+      </table>
+    </body></html>`);
+    win.document.close();
+    setTimeout(() => win.print(), 250);
+  };
 
   const runAnimatedTx = (payload: AnimatedTxPayload, commit: () => string[]) => {
     setActiveAnimatedTx(payload);
@@ -295,46 +472,72 @@ export default function BusinessDashboard({
     e.preventDefault();
     const amt = Number(wireAmt);
     const src = profile.accounts.find((a) => a.id === wireSrcId) ?? operatingAccounts[0];
+    const beneficiaryName = wireBeneficiary.trim();
+    const bankName = wireBankName.trim();
+    const beneficiaryAccount = wireAccountNumber.trim();
+
     if (!src || !amt || amt <= 0 || amt > src.balance) {
       notify("Please enter an amount within your operating balance.");
       return;
     }
-    const updatedBal = Math.round((src.balance - amt) * 100) / 100;
-    runAnimatedTx(
-      {
-        kind: "etransfer",
-        amount: amt,
-        currency: src.currency,
-        fromLabel: src.name,
-        toLabel: wireBeneficiary,
-        memo: `Wire settlement (${wireFxCurr})`,
-        reference: makeRef("WIR"),
-        timestamp: `${todayIso()} · ${nowStamp()}`,
-        updatedBalanceLabel: `${src.name}: ${formatMoney(updatedBal, src.currency)}`,
+    if (!beneficiaryName || !bankName || !beneficiaryAccount) {
+      notify("Complete the beneficiary, bank, and account details before submitting the transfer.");
+      return;
+    }
+
+    const destinationLabel = `${beneficiaryName} • ${wireCountry}`;
+    setPendingTransfer({
+      kind: "wire",
+      title: "Review external wire",
+      summary: `Confirm the wire to ${destinationLabel} before it is sent.`,
+      fromLabel: `${src.name} (${src.currency})`,
+      toLabel: `${beneficiaryName} · ${wireBankName} · ${wireCountry}`,
+      amount: amt,
+      actionLabel: "Confirm & send wire",
+      onConfirm: () => {
+        const updatedBal = Math.round((src.balance - amt) * 100) / 100;
+        const transferRef = makeRef("WIR");
+        runAnimatedTx(
+          {
+            kind: "etransfer",
+            amount: amt,
+            currency: src.currency,
+            fromLabel: src.name,
+            toLabel: destinationLabel,
+            memo: `External wire (${wireFxCurr}, ${wireFeeMode})`,
+            reference: transferRef,
+            timestamp: `${todayIso()} · ${nowStamp()}`,
+            updatedBalanceLabel: `${src.name}: ${formatMoney(updatedBal, src.currency)}`,
+          },
+          () => {
+            const txId = `wir-${Date.now()}`;
+            onUpdateProfile((prev) => ({
+              ...prev,
+              accounts: prev.accounts.map((a) =>
+                a.id === src.id ? { ...a, balance: updatedBal } : a
+              ),
+              transactions: [
+                {
+                  id: txId,
+                  accountId: src.id,
+                  date: todayIso(),
+                  description: `External wire — ${beneficiaryName} (${wireCountry}) • ${bankName}`,
+                  category: "Business",
+                  amount: -amt,
+                  status: "Posted",
+                  reference: transferRef,
+                  createdBy: "Client",
+                },
+                ...prev.transactions,
+              ],
+            }));
+            return [txId];
+          }
+        );
+        notify(`Transfer sent to ${destinationLabel}.`);
+        setPendingTransfer(null);
       },
-      () => {
-        const txId = `wir-${Date.now()}`;
-        onUpdateProfile((prev) => ({
-          ...prev,
-          accounts: prev.accounts.map((a) =>
-            a.id === src.id ? { ...a, balance: updatedBal } : a
-          ),
-          transactions: [
-            {
-              id: txId,
-              accountId: src.id,
-              date: todayIso(),
-              description: `Commercial wire — ${wireBeneficiary}`,
-              category: "Business",
-              amount: -amt,
-              status: "Posted",
-            },
-            ...prev.transactions,
-          ],
-        }));
-        return [txId];
-      }
-    );
+    });
   };
 
   const handleTaxRemittance = (e: React.FormEvent) => {
@@ -346,42 +549,56 @@ export default function BusinessDashboard({
       notify("Verify remittance amount and operating balance.");
       return;
     }
-    const updatedBal = Math.round((src.balance - amt) * 100) / 100;
-    runAnimatedTx(
-      {
-        kind: "bill",
-        amount: amt,
-        currency: "CAD",
-        fromLabel: src.name,
-        toLabel: `${payee.name} (${payee.accountRef})`,
-        memo: "Government tax remittance",
-        reference: makeRef("TAX"),
-        timestamp: `${todayIso()} · ${nowStamp()}`,
-        updatedBalanceLabel: `${src.name}: ${formatMoney(updatedBal)}`,
+
+    setPendingTransfer({
+      kind: "tax",
+      title: "Review tax remittance",
+      summary: `Confirm the payment to ${payee.name} before it is sent.`,
+      fromLabel: `${src.name} (${src.currency})`,
+      toLabel: `${payee.name} (${payee.accountRef})`,
+      amount: amt,
+      actionLabel: "Confirm & send remittance",
+      onConfirm: () => {
+        const updatedBal = Math.round((src.balance - amt) * 100) / 100;
+        runAnimatedTx(
+          {
+            kind: "bill",
+            amount: amt,
+            currency: "CAD",
+            fromLabel: src.name,
+            toLabel: `${payee.name} (${payee.accountRef})`,
+            memo: "Government tax remittance",
+            reference: makeRef("TAX"),
+            timestamp: `${todayIso()} · ${nowStamp()}`,
+            updatedBalanceLabel: `${src.name}: ${formatMoney(updatedBal)}`,
+          },
+          () => {
+            const txId = `tax-${Date.now()}`;
+            onUpdateProfile((prev) => ({
+              ...prev,
+              accounts: prev.accounts.map((a) =>
+                a.id === src.id ? { ...a, balance: updatedBal } : a
+              ),
+              transactions: [
+                {
+                  id: txId,
+                  accountId: src.id,
+                  date: todayIso(),
+                  description: `Tax remittance — ${payee.name}`,
+                  category: "Business",
+                  amount: -amt,
+                  status: "Posted",
+                },
+                ...prev.transactions,
+              ],
+            }));
+            return [txId];
+          }
+        );
+        notify(`Tax remittance sent to ${payee.name}.`);
+        setPendingTransfer(null);
       },
-      () => {
-        const txId = `tax-${Date.now()}`;
-        onUpdateProfile((prev) => ({
-          ...prev,
-          accounts: prev.accounts.map((a) =>
-            a.id === src.id ? { ...a, balance: updatedBal } : a
-          ),
-          transactions: [
-            {
-              id: txId,
-              accountId: src.id,
-              date: todayIso(),
-              description: `Tax remittance — ${payee.name}`,
-              category: "Business",
-              amount: -amt,
-              status: "Posted",
-            },
-            ...prev.transactions,
-          ],
-        }));
-        return [txId];
-      }
-    );
+    });
   };
 
   /** Converts funds between the corporate CAD and USD operating accounts at the posted rate. */
@@ -409,59 +626,72 @@ export default function BusinessDashboard({
     const converted = from.currency === "CAD"
       ? Math.round((amt / FX_RATES.USD.sellCad) * 100) / 100
       : Math.round(amt * FX_RATES.USD.buyCad * 100) / 100;
-    const ref = makeRef("FX");
 
-    runAnimatedTx(
-      {
-        kind: "transfer",
-        amount: amt,
-        currency: from.currency,
-        fromLabel: from.name,
-        toLabel: `${target.name} (${converted.toFixed(2)} ${target.currency})`,
-        memo: `FX at ${rate.toFixed(4)}`,
-        reference: ref,
-        timestamp: `${todayIso()} · ${nowStamp()}`,
-        updatedBalanceLabel: `${target.name}: ${formatMoney(round2(target.balance + converted), target.currency)}`,
+    setPendingTransfer({
+      kind: "fx",
+      title: "Review FX conversion",
+      summary: `Confirm the conversion from ${from.name} to ${target.name} before it is processed.`,
+      fromLabel: `${from.name} (${from.currency})`,
+      toLabel: `${target.name} (${target.currency})`,
+      amount: amt,
+      actionLabel: "Confirm & convert funds",
+      onConfirm: () => {
+        const ref = makeRef("FX");
+        runAnimatedTx(
+          {
+            kind: "transfer",
+            amount: amt,
+            currency: from.currency,
+            fromLabel: from.name,
+            toLabel: `${target.name} (${converted.toFixed(2)} ${target.currency})`,
+            memo: `FX at ${rate.toFixed(4)}`,
+            reference: ref,
+            timestamp: `${todayIso()} · ${nowStamp()}`,
+            updatedBalanceLabel: `${target.name}: ${formatMoney(round2(target.balance + converted), target.currency)}`,
+          },
+          () => {
+            const outId = `fx-${Date.now()}-o`;
+            const inId = `fx-${Date.now()}-i`;
+            onUpdateProfile((prev) => ({
+              ...prev,
+              accounts: prev.accounts.map((a) => {
+                if (a.id === from.id) return { ...a, balance: round2(a.balance - amt) };
+                if (a.id === target.id) return { ...a, balance: round2(a.balance + converted) };
+                return a;
+              }),
+              transactions: [
+                {
+                  id: inId,
+                  accountId: target.id,
+                  date: todayIso(),
+                  description: `FX conversion from ${from.name} @ ${rate.toFixed(4)}`,
+                  category: "Transfer",
+                  amount: converted,
+                  status: "Posted",
+                  reference: ref,
+                  createdBy: "Client",
+                },
+                {
+                  id: outId,
+                  accountId: from.id,
+                  date: todayIso(),
+                  description: `FX conversion to ${target.name} @ ${rate.toFixed(4)}`,
+                  category: "Transfer",
+                  amount: -amt,
+                  status: "Posted",
+                  reference: ref,
+                  createdBy: "Client",
+                },
+                ...prev.transactions,
+              ],
+            }));
+            return [inId, outId];
+          }
+        );
+        notify(`FX conversion sent from ${from.name}.`);
+        setPendingTransfer(null);
       },
-      () => {
-        const outId = `fx-${Date.now()}-o`;
-        const inId = `fx-${Date.now()}-i`;
-        onUpdateProfile((prev) => ({
-          ...prev,
-          accounts: prev.accounts.map((a) => {
-            if (a.id === from.id) return { ...a, balance: round2(a.balance - amt) };
-            if (a.id === target.id) return { ...a, balance: round2(a.balance + converted) };
-            return a;
-          }),
-          transactions: [
-            {
-              id: inId,
-              accountId: target.id,
-              date: todayIso(),
-              description: `FX conversion from ${from.name} @ ${rate.toFixed(4)}`,
-              category: "Transfer",
-              amount: converted,
-              status: "Posted",
-              reference: ref,
-              createdBy: "Client",
-            },
-            {
-              id: outId,
-              accountId: from.id,
-              date: todayIso(),
-              description: `FX conversion to ${target.name} @ ${rate.toFixed(4)}`,
-              category: "Transfer",
-              amount: -amt,
-              status: "Posted",
-              reference: ref,
-              createdBy: "Client",
-            },
-            ...prev.transactions,
-          ],
-        }));
-        return [inId, outId];
-      }
-    );
+    });
   };
 
   const handleTreasuryTransfer = (e: React.FormEvent) => {
@@ -474,58 +704,72 @@ export default function BusinessDashboard({
       return;
     }
     const updatedSrc = Math.round((src.balance - amt) * 100) / 100;
-    runAnimatedTx(
-      {
-        kind: "transfer",
-        amount: amt,
-        currency: src.currency,
-        fromLabel: src.name,
-        toLabel: dst.name,
-        reference: makeRef("SWP"),
-        timestamp: `${todayIso()} · ${nowStamp()}`,
-        updatedBalanceLabel: `${src.name}: ${formatMoney(updatedSrc, src.currency)}`,
+
+    setPendingTransfer({
+      kind: "treasury",
+      title: "Review treasury transfer",
+      summary: `Confirm the internal transfer from ${src.name} to ${dst.name} before it is sent.`,
+      fromLabel: `${src.name} (${src.currency})`,
+      toLabel: `${dst.name} (${dst.currency})`,
+      amount: amt,
+      actionLabel: "Confirm & send transfer",
+      onConfirm: () => {
+        runAnimatedTx(
+          {
+            kind: "transfer",
+            amount: amt,
+            currency: src.currency,
+            fromLabel: src.name,
+            toLabel: dst.name,
+            reference: makeRef("SWP"),
+            timestamp: `${todayIso()} · ${nowStamp()}`,
+            updatedBalanceLabel: `${src.name}: ${formatMoney(updatedSrc, src.currency)}`,
+          },
+          () => {
+            const outId = `trs-${Date.now()}-o`;
+            const inId = `trs-${Date.now()}-i`;
+            onUpdateProfile((prev) => ({
+              ...prev,
+              accounts: prev.accounts.map((a) => {
+                if (a.id === src.id) return { ...a, balance: updatedSrc };
+                if (a.id === dst.id) {
+                  const isDebt = a.category === "credit" || a.category === "loan";
+                  return {
+                    ...a,
+                    balance: Math.round((isDebt ? Math.max(0, a.balance - amt) : a.balance + amt) * 100) / 100,
+                  };
+                }
+                return a;
+              }),
+              transactions: [
+                {
+                  id: inId,
+                  accountId: dst.id,
+                  date: todayIso(),
+                  description: `Inter-account transfer from ${src.name}`,
+                  category: "Transfer",
+                  amount: amt,
+                  status: "Posted",
+                },
+                {
+                  id: outId,
+                  accountId: src.id,
+                  date: todayIso(),
+                  description: `Inter-account transfer to ${dst.name}`,
+                  category: "Transfer",
+                  amount: -amt,
+                  status: "Posted",
+                },
+                ...prev.transactions,
+              ],
+            }));
+            return [inId, outId];
+          }
+        );
+        notify(`Transfer from ${src.name} sent successfully.`);
+        setPendingTransfer(null);
       },
-      () => {
-        const outId = `trs-${Date.now()}-o`;
-        const inId = `trs-${Date.now()}-i`;
-        onUpdateProfile((prev) => ({
-          ...prev,
-          accounts: prev.accounts.map((a) => {
-            if (a.id === src.id) return { ...a, balance: updatedSrc };
-            if (a.id === dst.id) {
-              const isDebt = a.category === "credit" || a.category === "loan";
-              return {
-                ...a,
-                balance: Math.round((isDebt ? Math.max(0, a.balance - amt) : a.balance + amt) * 100) / 100,
-              };
-            }
-            return a;
-          }),
-          transactions: [
-            {
-              id: inId,
-              accountId: dst.id,
-              date: todayIso(),
-              description: `Inter-account transfer from ${src.name}`,
-              category: "Transfer",
-              amount: amt,
-              status: "Posted",
-            },
-            {
-              id: outId,
-              accountId: src.id,
-              date: todayIso(),
-              description: `Inter-account transfer to ${dst.name}`,
-              category: "Transfer",
-              amount: -amt,
-              status: "Posted",
-            },
-            ...prev.transactions,
-          ],
-        }));
-        return [inId, outId];
-      }
-    );
+    });
   };
 
   const toggleCardSetting = (
@@ -540,12 +784,39 @@ export default function BusinessDashboard({
   };
 
   const filteredLedger = useMemo(() => {
-    return profile.transactions.filter((tx) => {
-      if (ledgerAcc !== "all" && tx.accountId !== ledgerAcc) return false;
-      if (ledgerQuery.trim() && !tx.description.toLowerCase().includes(ledgerQuery.trim().toLowerCase())) return false;
-      return true;
-    });
+    return profile.transactions
+      .filter((tx) => {
+        if (ledgerAcc !== "all" && tx.accountId !== ledgerAcc) return false;
+        if (ledgerQuery.trim() && !tx.description.toLowerCase().includes(ledgerQuery.trim().toLowerCase())) return false;
+        return true;
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [profile.transactions, ledgerAcc, ledgerQuery]);
+
+  const groupedLedger = useMemo(() => {
+    const groups = new Map<string, { label: string; txs: typeof filteredLedger }>();
+
+    for (const tx of filteredLedger) {
+      const monthKey = tx.date.slice(0, 7);
+      const label = new Date(`${tx.date}T12:00:00`).toLocaleDateString("en-CA", {
+        month: "long",
+        year: "numeric",
+      });
+
+      const existing = groups.get(monthKey);
+      if (existing) {
+        existing.txs.push(tx);
+      } else {
+        groups.set(monthKey, { label, txs: [tx] });
+      }
+    }
+
+    return Array.from(groups.entries()).map(([monthKey, group]) => ({
+      monthKey,
+      label: group.label,
+      txs: group.txs,
+    }));
+  }, [filteredLedger]);
 
   const navTabs: [BizTab, string][] = [
     ["treasury", "Cash position"],
@@ -743,10 +1014,7 @@ export default function BusinessDashboard({
                           <td className="px-4 py-4 sm:px-5">
                             <button
                               type="button"
-                              onClick={() => {
-                                setLedgerAcc(acc.id);
-                                setTab("ledger");
-                              }}
+                              onClick={() => openAccountDetail(acc.id)}
                               className="text-left font-semibold text-[#1572C5] underline decoration-1 underline-offset-2 hover:text-[#105797] hover:no-underline"
                             >
                               {acc.name}
@@ -802,7 +1070,13 @@ export default function BusinessDashboard({
                       {summary.facilities.map((acc) => (
                         <tr key={acc.id} className="hover:bg-[#faf8f3]">
                           <td className="px-4 py-4 sm:px-5">
-                            <p className="font-semibold text-[#121212]">{acc.name}</p>
+                            <button
+                              type="button"
+                              onClick={() => openAccountDetail(acc.id)}
+                              className="text-left font-semibold text-[#1572C5] underline decoration-1 underline-offset-2 hover:text-[#105797] hover:no-underline"
+                            >
+                              {acc.name}
+                            </button>
                             <p className="mt-0.5 font-mono text-[12.5px] text-[#565656]">{acc.number}</p>
                             <p className="mt-0.5 text-[12px] text-[#777] md:hidden">
                               <span className="sm:hidden">
@@ -841,13 +1115,22 @@ export default function BusinessDashboard({
                 </div>
                 {/* Compact Mobile Commercial Postings (zero horizontal scroll) */}
                 <ul className="divide-y divide-[#f1f1f1] sm:hidden">
-                  {profile.transactions.slice(0, 5).map((tx) => {
+                  {sortedTransactions.slice(0, 5).map((tx) => {
                     const acc = profile.accounts.find((a) => a.id === tx.accountId);
                     const isNew = recentTxIds.includes(tx.id);
                     return (
                       <li
                         key={tx.id}
-                        className={`flex items-start justify-between gap-3 px-3.5 py-2.5 ${
+                        onClick={() => setSelectedTxId(tx.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setSelectedTxId(tx.id);
+                          }
+                        }}
+                        tabIndex={0}
+                        role="button"
+                        className={`flex cursor-pointer items-start justify-between gap-3 px-3.5 py-2.5 outline-none transition hover:bg-[#faf8f3] focus:bg-[#faf8f3] ${
                           isNew ? "animate-tx-row-new" : ""
                         }`}
                       >
@@ -864,9 +1147,7 @@ export default function BusinessDashboard({
                             tx.amount >= 0 ? "text-[#017a33]" : "text-[#121212]"
                           }`}
                         >
-                          {tx.amount >= 0
-                            ? `+${formatMoney(tx.amount, acc?.currency ?? "CAD")}`
-                            : formatMoney(tx.amount, acc?.currency ?? "CAD")}
+                          {txDisplayAmount(tx.amount, acc?.currency ?? "CAD")}
                         </span>
                       </li>
                     );
@@ -885,11 +1166,23 @@ export default function BusinessDashboard({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#f1f1f1]">
-                      {profile.transactions.slice(0, 5).map((tx) => {
+                      {sortedTransactions.slice(0, 5).map((tx) => {
                         const acc = profile.accounts.find((a) => a.id === tx.accountId);
                         const isNew = recentTxIds.includes(tx.id);
                         return (
-                          <tr key={tx.id} className={`hover:bg-[#faf8f3] ${isNew ? "animate-tx-row-new" : ""}`}>
+                          <tr
+                            key={tx.id}
+                            onClick={() => setSelectedTxId(tx.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setSelectedTxId(tx.id);
+                              }
+                            }}
+                            tabIndex={0}
+                            role="button"
+                            className={`cursor-pointer hover:bg-[#faf8f3] focus:bg-[#faf8f3] ${isNew ? "animate-tx-row-new" : ""}`}
+                          >
                             <td className="whitespace-nowrap px-5 py-3 tabular-nums text-[#565656]">{tx.date}</td>
                             <td className="break-words px-5 py-3 font-medium text-[#121212]">
                               {tx.description}
@@ -905,9 +1198,7 @@ export default function BusinessDashboard({
                                 tx.amount >= 0 ? "text-[#017a33]" : "text-[#121212]"
                               }`}
                             >
-                              {tx.amount >= 0
-                                ? `+${formatMoney(tx.amount, acc?.currency ?? "CAD")}`
-                                : formatMoney(tx.amount, acc?.currency ?? "CAD")}
+                              {txDisplayAmount(tx.amount, acc?.currency ?? "CAD")}
                             </td>
                           </tr>
                         );
@@ -1339,7 +1630,7 @@ export default function BusinessDashboard({
 
         {/* TAB 4: WIRES, TAX REMITTANCES & SWEEPS */}
         {tab === "wires" && (
-          <div className="space-y-6">
+          <div className="space-y-6 rounded-[6px] bg-[#f8f6f1] p-0">
             <div className="scroll-tabs rounded-t-[6px] border-b border-[#dcd8ce] bg-white px-2">
               {(
                 [
@@ -1352,7 +1643,10 @@ export default function BusinessDashboard({
                 <button
                   key={id}
                   type="button"
-                  onClick={() => setWireMode(id)}
+                  onClick={() => {
+                    setPendingTransfer(null);
+                    setWireMode(id);
+                  }}
                   className={`border-b-[3px] px-4 py-3.5 text-[14px] transition sm:px-5 ${
                     wireMode === id
                       ? "border-nbc-red font-semibold text-nbc-navy"
@@ -1364,12 +1658,68 @@ export default function BusinessDashboard({
               ))}
             </div>
 
-            {wireMode === "wire" && (
+            {pendingTransfer && (
+              <div className="max-w-[760px] rounded-[6px] border border-[#d8d1c2] bg-white p-6 shadow-[0_4px_16px_rgba(0,0,0,0.04)]">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#565656]">Transfer review</p>
+                    <h2 className="mt-1 text-[24px] font-bold text-nbc-navy">{pendingTransfer.title}</h2>
+                  </div>
+                  <span className="rounded-full bg-[#faf3f3] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-nbc-red">
+                    Verify before send
+                  </span>
+                </div>
+
+                <p className="mt-4 text-[14px] text-[#565656]">{pendingTransfer.summary}</p>
+
+                <div className="mt-5 grid gap-4 rounded-[6px] border border-[#e5e2da] bg-[#f8f6f1] p-4 md:grid-cols-2">
+                  <div>
+                    <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#565656]">From</p>
+                    <p className="mt-1 text-[15px] font-semibold text-nbc-navy">{pendingTransfer.fromLabel}</p>
+                  </div>
+                  <div>
+                    <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#565656]">To</p>
+                    <p className="mt-1 text-[15px] font-semibold text-nbc-navy">{pendingTransfer.toLabel}</p>
+                  </div>
+                </div>
+
+                <div className="mt-5 rounded-[6px] bg-[#faf8f3] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[13px] font-semibold uppercase tracking-[0.08em] text-[#565656]">Amount</span>
+                    <span className="text-[24px] font-bold tabular-nums text-nbc-navy">
+                      {formatMoney(pendingTransfer.amount, pendingTransfer.kind === "wire" ? (wireFxCurr === "USD" ? "USD" : "CAD") : "CAD")}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-6 flex flex-wrap gap-3">
+                  <button type="button" onClick={pendingTransfer.onConfirm} className="nbc-btn nbc-btn-primary">
+                    {pendingTransfer.actionLabel}
+                  </button>
+                  <button type="button" onClick={() => setPendingTransfer(null)} className="nbc-btn nbc-btn-ghost">
+                    Edit details
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!pendingTransfer && wireMode === "wire" && (
               <form
                 onSubmit={handleSendWire}
-                className="max-w-[680px] space-y-4 rounded-[6px] border border-[#e5e2da] bg-white p-6"
+                className="max-w-[760px] space-y-5 rounded-[6px] border border-[#e5e2da] bg-[#f8f6f1] p-6"
               >
-                <h2 className="text-[20px] font-bold text-nbc-navy">Send a commercial wire</h2>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-[20px] font-bold text-nbc-navy">Send an external wire</h2>
+                    <p className="mt-1 text-[13px] text-[#565656]">
+                      Domestic and international transfers to other banks and countries.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-[#faf3f3] px-2.5 py-1 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-nbc-red">
+                    Cross-border
+                  </span>
+                </div>
+
                 <div>
                   <label htmlFor="w-src" className="block text-[13px] font-semibold text-[#121212]">
                     Debit account
@@ -1387,20 +1737,103 @@ export default function BusinessDashboard({
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label htmlFor="w-ben" className="block text-[13px] font-semibold text-[#121212]">
-                    Beneficiary name & routing / SWIFT
-                  </label>
-                  <input
-                    id="w-ben"
-                    type="text"
-                    value={wireBeneficiary}
-                    onChange={(e) => setWireBeneficiary(e.target.value)}
-                    required
-                    className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
-                  />
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label htmlFor="w-ben" className="block text-[13px] font-semibold text-[#121212]">
+                      Beneficiary name
+                    </label>
+                    <input
+                      id="w-ben"
+                      type="text"
+                      value={wireBeneficiary}
+                      onChange={(e) => setWireBeneficiary(e.target.value)}
+                      required
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="w-country" className="block text-[13px] font-semibold text-[#121212]">
+                      Beneficiary country
+                    </label>
+                    <select
+                      id="w-country"
+                      value={wireCountry}
+                      onChange={(e) => setWireCountry(e.target.value)}
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                    >
+                      {EXTERNAL_TRANSFER_COUNTRIES.map((country) => (
+                        <option key={country} value={country}>
+                          {country}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2">
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label htmlFor="w-bank" className="block text-[13px] font-semibold text-[#121212]">
+                      Beneficiary bank name
+                    </label>
+                    <input
+                      id="w-bank"
+                      type="text"
+                      value={wireBankName}
+                      onChange={(e) => setWireBankName(e.target.value)}
+                      required
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="w-bank-country" className="block text-[13px] font-semibold text-[#121212]">
+                      Bank country
+                    </label>
+                    <select
+                      id="w-bank-country"
+                      value={wireBankCountry}
+                      onChange={(e) => setWireBankCountry(e.target.value)}
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                    >
+                      {EXTERNAL_TRANSFER_COUNTRIES.map((country) => (
+                        <option key={country} value={country}>
+                          {country}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label htmlFor="w-swift" className="block text-[13px] font-semibold text-[#121212]">
+                      SWIFT / BIC
+                    </label>
+                    <input
+                      id="w-swift"
+                      type="text"
+                      value={wireBankSwift}
+                      onChange={(e) => setWireBankSwift(e.target.value)}
+                      required
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] uppercase text-[#121212]"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="w-acc" className="block text-[13px] font-semibold text-[#121212]">
+                      Account / IBAN number
+                    </label>
+                    <input
+                      id="w-acc"
+                      type="text"
+                      value={wireAccountNumber}
+                      onChange={(e) => setWireAccountNumber(e.target.value)}
+                      required
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-3">
                   <div>
                     <label htmlFor="w-amt" className="block text-[13px] font-semibold text-[#121212]">
                       Amount
@@ -1433,17 +1866,50 @@ export default function BusinessDashboard({
                       ))}
                     </select>
                   </div>
+                  <div>
+                    <label htmlFor="w-fee" className="block text-[13px] font-semibold text-[#121212]">
+                      Fee method
+                    </label>
+                    <select
+                      id="w-fee"
+                      value={wireFeeMode}
+                      onChange={(e) => setWireFeeMode(e.target.value as "OUR" | "BEN" | "SHA")}
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                    >
+                      <option value="OUR">OUR</option>
+                      <option value="BEN">BEN</option>
+                      <option value="SHA">SHA</option>
+                    </select>
+                  </div>
                 </div>
+
+                <div>
+                  <label htmlFor="w-purpose" className="block text-[13px] font-semibold text-[#121212]">
+                    Purpose of payment
+                  </label>
+                  <input
+                    id="w-purpose"
+                    type="text"
+                    value={wirePurpose}
+                    onChange={(e) => setWirePurpose(e.target.value)}
+                    className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                  />
+                </div>
+
+                <div className="rounded-[6px] bg-[#faf8f3] p-3 text-[13px] text-[#565656]">
+                  Payment summary: {(wireBeneficiary || "Beneficiary").trim() || "Beneficiary"} • {wireBankName || "Bank name"} • {wireCountry} • {wireFeeMode} fees.
+                </div>
+
                 <button type="submit" className="nbc-btn nbc-btn-primary">
                   Submit wire payment
                 </button>
               </form>
             )}
 
-            {wireMode === "tax" && (
+            {!pendingTransfer && wireMode === "tax" && (
               <form
                 onSubmit={handleTaxRemittance}
-                className="max-w-[620px] space-y-4 rounded-[6px] border border-[#e5e2da] bg-white p-6"
+                className="max-w-[620px] space-y-4 rounded-[6px] border border-[#e5e2da] bg-[#f8f6f1] p-6"
               >
                 <h2 className="text-[20px] font-bold text-nbc-navy">Government tax & source deductions</h2>
                 <div>
@@ -1484,10 +1950,10 @@ export default function BusinessDashboard({
               </form>
             )}
 
-            {wireMode === "treasury" && (
+            {!pendingTransfer && wireMode === "treasury" && (
               <form
                 onSubmit={handleTreasuryTransfer}
-                className="max-w-[660px] space-y-4 rounded-[6px] border border-[#e5e2da] bg-white p-6"
+                className="max-w-[660px] space-y-4 rounded-[6px] border border-[#e5e2da] bg-[#f8f6f1] p-6"
               >
                 <h2 className="text-[20px] font-bold text-nbc-navy">Inter-account treasury sweep</h2>
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -1547,8 +2013,8 @@ export default function BusinessDashboard({
               </form>
             )}
 
-            {wireMode === "fx" && (
-              <form onSubmit={handleFxConvert} className="max-w-[620px] space-y-4 rounded-[6px] border border-[#e5e2da] bg-white p-6">
+            {!pendingTransfer && wireMode === "fx" && (
+              <form onSubmit={handleFxConvert} className="max-w-[620px] space-y-4 rounded-[6px] border border-[#e5e2da] bg-[#f8f6f1] p-6">
                 <h2 className="text-[20px] font-bold text-nbc-navy">Convert between CAD and USD</h2>
                 <p className="text-[13px] text-[#565656]">
                   Funds are converted at the posted rate and both accounts are updated.
@@ -1658,6 +2124,172 @@ export default function BusinessDashboard({
           </div>
         )}
 
+        {/* TAB: ACCOUNT DETAILS */}
+        {tab === "account" && accountDetail && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-[6px] border border-[#e5e2da] bg-white p-5">
+              <div>
+                <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#565656]">Account overview</p>
+                <h2 className="mt-1 text-[26px] font-bold text-nbc-navy">{accountDetail.name}</h2>
+                <p className="mt-1 text-[13px] text-[#565656]">{accountDetail.number} · {accountDetail.currency}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setTab("treasury")}
+                  className="rounded-full border border-[#c9c3b6] px-4 py-2 text-[12.5px] font-semibold text-nbc-navy transition hover:bg-[#f7f5f2]"
+                >
+                  Back to accounts
+                </button>
+                <button
+                  type="button"
+                  onClick={() => generatePdfStatement(accountDetail.id)}
+                  className="rounded-full bg-nbc-navy px-4 py-2 text-[12.5px] font-semibold text-white transition hover:bg-[#0b1a2d]"
+                >
+                  Generate PDF statement
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-12">
+              <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5 lg:col-span-4">
+                <p className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#565656]">Available balance</p>
+                <div className="mt-3 text-[30px] font-bold tabular-nums text-nbc-navy">
+                  {formatMoney(accountDetail.balance, accountDetail.currency)}
+                </div>
+                <div className="mt-4 space-y-3 text-[14px] text-[#333]">
+                  <div className="flex items-center justify-between border-b border-[#efefef] pb-2">
+                    <span>Account type</span>
+                    <strong>{accountDetailMeta?.accountTypeName ?? accountDetail.category}</strong>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-[#efefef] pb-2">
+                    <span>Currency</span>
+                    <strong>{accountDetail.currency}</strong>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-[#efefef] pb-2">
+                    <span>Reference</span>
+                    <strong>{accountDetail.number}</strong>
+                  </div>
+                  {accountDetail.category === "credit" && typeof accountDetail.limit === "number" && (
+                    <div className="flex items-center justify-between border-b border-[#efefef] pb-2">
+                      <span>Approved limit</span>
+                      <strong>{formatMoney(accountDetail.limit, accountDetail.currency)}</strong>
+                    </div>
+                  )}
+                  {accountDetailMeta?.remainingAvailable !== null && (
+                    <div className="flex items-center justify-between border-b border-[#efefef] pb-2">
+                      <span>Available to draw</span>
+                      <strong>{formatMoney(accountDetailMeta.remainingAvailable, accountDetail.currency)}</strong>
+                    </div>
+                  )}
+                  {accountDetail.rate ? (
+                    <div className="flex items-center justify-between border-b border-[#efefef] pb-2">
+                      <span>Rate</span>
+                      <strong>{accountDetail.rate}</strong>
+                    </div>
+                  ) : null}
+                  <div className="flex items-center justify-between pb-2">
+                    <span>Last activity</span>
+                    <strong>{accountDetailTransactions[0]?.date ?? "No transactions"}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-[6px] border border-[#e5e2da] bg-white lg:col-span-8">
+                <div className="border-b border-[#e5e2da] bg-[#fcfbf8] px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-[18px] font-bold text-nbc-navy">Recent account activity</h3>
+                    <button
+                      type="button"
+                      onClick={() => generatePdfStatement(accountDetail.id)}
+                      className="text-[13px] font-semibold text-[#1572C5] underline decoration-1 underline-offset-2 hover:no-underline"
+                    >
+                      Download PDF statement
+                    </button>
+                  </div>
+
+                  {accountDetailTransactions.length > ACTIVITY_PAGE_SIZE && (
+                    <div className="mt-3 flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActivityPage((page) => Math.max(page - 1, 0))}
+                        disabled={safeActivityPage === 0}
+                        className="rounded-full border border-[#c9c3b6] px-3 py-1.5 text-[12px] font-semibold text-nbc-navy transition hover:bg-[#f7f5f2] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Previous
+                      </button>
+                      <span className="text-[12px] font-semibold text-[#565656]">
+                        {safeActivityPage + 1} / {activityPageCount}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setActivityPage((page) => Math.min(page + 1, activityPageCount - 1))}
+                        disabled={safeActivityPage >= activityPageCount - 1}
+                        className="rounded-full border border-[#c9c3b6] px-3 py-1.5 text-[12px] font-semibold text-nbc-navy transition hover:bg-[#f7f5f2] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <ul className="divide-y divide-[#efefef]">
+                  {pagedAccountDetailTransactions.map((tx) => (
+                    <li
+                      key={tx.id}
+                      onClick={() => setSelectedTxId(tx.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedTxId(tx.id);
+                        }
+                      }}
+                      tabIndex={0}
+                      role="button"
+                      className="flex cursor-pointer items-start justify-between gap-3 px-4 py-3 outline-none transition hover:bg-[#faf8f3] focus:bg-[#faf8f3]"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words text-[13.5px] font-medium text-[#121212]">{tx.description}</p>
+                        <p className="mt-0.5 text-[11.5px] text-[#666]">{tx.date}</p>
+                      </div>
+                      <span className={`whitespace-nowrap text-right text-[13.5px] font-semibold tabular-nums ${tx.amount >= 0 ? "text-[#017a33]" : "text-[#121212]"}`}>
+                        {txDisplayAmount(tx.amount, accountDetail.currency)}
+                      </span>
+                    </li>
+                  ))}
+                  {accountDetailTransactions.length === 0 && (
+                    <li className="px-4 py-5 text-[13.5px] text-[#565656]">No transactions available for this account.</li>
+                  )}
+                </ul>
+
+                {accountDetailTransactions.length > ACTIVITY_PAGE_SIZE && (
+                  <div className="flex items-center justify-end gap-2 border-t border-[#e5e2da] bg-[#fcfbf8] px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => setActivityPage((page) => Math.max(page - 1, 0))}
+                      disabled={safeActivityPage === 0}
+                      className="rounded-full border border-[#c9c3b6] px-3 py-1.5 text-[12px] font-semibold text-nbc-navy transition hover:bg-[#f7f5f2] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-[12px] font-semibold text-[#565656]">
+                      {safeActivityPage + 1} / {activityPageCount}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setActivityPage((page) => Math.min(page + 1, activityPageCount - 1))}
+                      disabled={safeActivityPage >= activityPageCount - 1}
+                      className="rounded-full border border-[#c9c3b6] px-3 py-1.5 text-[12px] font-semibold text-nbc-navy transition hover:bg-[#f7f5f2] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* TAB 6: COMMERCIAL STATEMENTS */}
         {tab === "ledger" && (
           <div className="space-y-5">
@@ -1686,15 +2318,10 @@ export default function BusinessDashboard({
               </div>
               <button
                 type="button"
-                onClick={() =>
-                  downloadFile(
-                    `statement-${profile.fullName.replace(/[^a-z0-9]+/gi, "-")}-${todayIso()}.csv`,
-                    statementCsv(profile, ledgerAcc)
-                  )
-                }
+                onClick={() => generatePdfStatement(ledgerAcc)}
                 className="rounded-full border border-nbc-navy px-4 py-2 text-[12.5px] font-semibold text-nbc-navy transition hover:bg-nbc-navy hover:text-white"
               >
-                Download statement (CSV)
+                Generate PDF statement
               </button>
             </div>
 
@@ -1706,41 +2333,57 @@ export default function BusinessDashboard({
                   <span>Amount</span>
                 </div>
                 <ul className="divide-y divide-[#efefef]">
-                  {filteredLedger.map((tx) => {
-                    const acc = profile.accounts.find((a) => a.id === tx.accountId);
-                    const isNew = recentTxIds.includes(tx.id);
-                    return (
-                      <li
-                        key={tx.id}
-                        className={`flex items-start justify-between gap-3 px-3.5 py-2.5 ${
-                          isNew ? "animate-tx-row-new" : ""
-                        }`}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="break-words text-[13px] font-medium leading-[18px] text-[#121212]">
-                            {tx.description}
-                          </p>
-                          <p className="mt-0.5 truncate text-[11.5px] text-[#666]">
-                            <span className="tabular-nums">{tx.date}</span> · {acc?.name ?? tx.accountId}
-                          </p>
-                        </div>
-                        <div className="flex-none pt-0.5 text-right">
-                          <span
-                            className={`block whitespace-nowrap text-[13px] font-semibold tabular-nums ${
-                              tx.amount >= 0 ? "text-[#017a33]" : "text-[#121212]"
-                            }`}
-                          >
-                            {tx.amount >= 0
-                              ? `+${formatMoney(tx.amount, acc?.currency ?? "CAD")}`
-                              : formatMoney(tx.amount, acc?.currency ?? "CAD")}
-                          </span>
-                          <span className="block text-[10.5px] text-[#777]">
-                            {tx.amount >= 0 ? "Credit" : "Debit"}
-                          </span>
-                        </div>
-                      </li>
-                    );
-                  })}
+                  {groupedLedger.map(({ monthKey, label, txs }) => (
+                    <li key={monthKey} className="border-b border-[#efefef]">
+                      <div className="bg-[#faf8f3] px-3.5 py-2 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[#565656]">
+                        {label}
+                      </div>
+                      <ul className="divide-y divide-[#efefef]">
+                        {txs.map((tx) => {
+                          const acc = profile.accounts.find((a) => a.id === tx.accountId);
+                          const isNew = recentTxIds.includes(tx.id);
+                          return (
+                            <li
+                              key={tx.id}
+                              onClick={() => setSelectedTxId(tx.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  setSelectedTxId(tx.id);
+                                }
+                              }}
+                              tabIndex={0}
+                              role="button"
+                              className={`flex cursor-pointer items-start justify-between gap-3 px-3.5 py-2.5 outline-none transition hover:bg-[#faf8f3] focus:bg-[#faf8f3] ${
+                                isNew ? "animate-tx-row-new" : ""
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="break-words text-[13px] font-medium leading-[18px] text-[#121212]">
+                                  {tx.description}
+                                </p>
+                                <p className="mt-0.5 truncate text-[11.5px] text-[#666]">
+                                  <span className="tabular-nums">{tx.date}</span> · {acc?.name ?? tx.accountId}
+                                </p>
+                              </div>
+                              <div className="flex-none pt-0.5 text-right">
+                                <span
+                                  className={`block whitespace-nowrap text-[13px] font-semibold tabular-nums ${
+                                    tx.amount >= 0 ? "text-[#017a33]" : "text-[#121212]"
+                                  }`}
+                                >
+                                  {txDisplayAmount(tx.amount, acc?.currency ?? "CAD")}
+                                </span>
+                                <span className="block text-[10.5px] text-[#777]">
+                                  {tx.amount >= 0 ? "Credit" : "Debit"}
+                                </span>
+                              </div>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </li>
+                  ))}
                 </ul>
               </div>
 
@@ -1757,30 +2400,49 @@ export default function BusinessDashboard({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#efefef]">
-                    {filteredLedger.map((tx) => {
-                      const acc = profile.accounts.find((a) => a.id === tx.accountId);
-                      const isNew = recentTxIds.includes(tx.id);
-                      return (
-                        <tr key={tx.id} className={`hover:bg-[#faf8f3] ${isNew ? "animate-tx-row-new" : ""}`}>
-                          <td className="whitespace-nowrap px-5 py-3.5 tabular-nums text-[#565656]">{tx.date}</td>
-                          <td className="break-words px-5 py-3.5 font-medium text-[#121212]">
-                            {tx.description}
-                            <span className="mt-0.5 block text-[12px] font-normal text-[#777] md:hidden">
+                    {groupedLedger.flatMap(({ monthKey, label, txs }) => [
+                      <tr key={`${monthKey}-header`} className="bg-[#faf8f3]">
+                        <td colSpan={5} className="px-5 py-2 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[#565656]">
+                          {label}
+                        </td>
+                      </tr>,
+                      ...txs.map((tx) => {
+                        const acc = profile.accounts.find((a) => a.id === tx.accountId);
+                        const isNew = recentTxIds.includes(tx.id);
+                        return (
+                          <tr
+                            key={tx.id}
+                            onClick={() => setSelectedTxId(tx.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setSelectedTxId(tx.id);
+                              }
+                            }}
+                            tabIndex={0}
+                            role="button"
+                            className={`cursor-pointer hover:bg-[#faf8f3] focus:bg-[#faf8f3] ${isNew ? "animate-tx-row-new" : ""}`}
+                          >
+                            <td className="whitespace-nowrap px-5 py-3.5 tabular-nums text-[#565656]">{tx.date}</td>
+                            <td className="break-words px-5 py-3.5 font-medium text-[#121212]">
+                              {tx.description}
+                              <span className="mt-0.5 block text-[12px] font-normal text-[#777] md:hidden">
+                                {acc?.name ?? tx.accountId}
+                              </span>
+                            </td>
+                            <td className="hidden truncate px-5 py-3.5 text-[13px] text-[#565656] md:table-cell">
                               {acc?.name ?? tx.accountId}
-                            </span>
-                          </td>
-                          <td className="hidden truncate px-5 py-3.5 text-[13px] text-[#565656] md:table-cell">
-                            {acc?.name ?? tx.accountId}
-                          </td>
-                          <td className="whitespace-nowrap px-5 py-3.5 text-right font-semibold tabular-nums text-[#121212]">
-                            {tx.amount < 0 ? formatMoney(Math.abs(tx.amount), acc?.currency ?? "CAD") : "—"}
-                          </td>
-                          <td className="whitespace-nowrap px-5 py-3.5 text-right font-semibold tabular-nums text-[#017a33]">
-                            {tx.amount >= 0 ? formatMoney(tx.amount, acc?.currency ?? "CAD") : "—"}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            </td>
+                            <td className="whitespace-nowrap px-5 py-3.5 text-right font-semibold tabular-nums text-[#121212]">
+                              {tx.amount < 0 ? txDisplayAmount(tx.amount, acc?.currency ?? "CAD") : "—"}
+                            </td>
+                            <td className="whitespace-nowrap px-5 py-3.5 text-right font-semibold tabular-nums text-[#017a33]">
+                              {tx.amount >= 0 ? txDisplayAmount(tx.amount, acc?.currency ?? "CAD") : "—"}
+                            </td>
+                          </tr>
+                        );
+                      }),
+                    ])}
                   </tbody>
                 </table>
               </div>
@@ -1788,6 +2450,71 @@ export default function BusinessDashboard({
           </div>
         )}
       </main>
+
+      {selectedTx && selectedTxAccount && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-[12px] border border-[#e5e2da] bg-white p-5 shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-[#565656]">Transaction details</p>
+                <h3 className="mt-2 text-[24px] font-bold text-nbc-navy">{selectedTx.description}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedTxId(null)}
+                className="rounded-full border border-[#d7d3ca] px-2.5 py-1 text-[12px] font-medium text-[#121212] hover:bg-[#f7f5f2]"
+              >
+                Close
+              </button>
+            </div>
+
+            <dl className="mt-5 space-y-3 text-[14px]">
+              <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
+                <dt className="text-[#565656]">Date</dt>
+                <dd className="font-semibold tabular-nums text-[#121212]">{selectedTx.date}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
+                <dt className="text-[#565656]">Account</dt>
+                <dd className="font-semibold text-[#121212]">{selectedTxAccount.name}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
+                <dt className="text-[#565656]">Category</dt>
+                <dd className="font-semibold text-[#121212]">{selectedTx.category ?? "—"}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
+                <dt className="text-[#565656]">Status</dt>
+                <dd className="font-semibold text-[#121212]">{selectedTx.status ?? "Posted"}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
+                <dt className="text-[#565656]">Type</dt>
+                <dd className="font-semibold text-[#121212]">{selectedTx.amount >= 0 ? "Credit" : "Debit"}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
+                <dt className="text-[#565656]">Amount</dt>
+                <dd className={`font-bold tabular-nums ${selectedTx.amount >= 0 ? "text-[#017a33]" : "text-[#121212]"}`}>
+                  {txDisplayAmount(selectedTx.amount, selectedTxAccount.currency)}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
+                <dt className="text-[#565656]">Reference</dt>
+                <dd className="font-semibold tabular-nums text-[#121212]">{selectedTx.reference ?? `REF-${selectedTx.id.toUpperCase()}`}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
+                <dt className="text-[#565656]">Memo</dt>
+                <dd className="max-w-[60%] text-right font-medium text-[#121212]">{selectedTx.description}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
+                <dt className="text-[#565656]">Posted by</dt>
+                <dd className="font-semibold text-[#121212]">{selectedTx.createdBy ?? "System"}</dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 pb-1">
+                <dt className="text-[#565656]">Transaction ID</dt>
+                <dd className="font-semibold tabular-nums text-[#121212]">{selectedTx.id}</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

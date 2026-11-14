@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   logoNbc,
   pictoCarteCreditRed,
@@ -11,7 +11,7 @@ import {
   BankAccount,
   ClientPreferences,
   DEFAULT_PREFERENCES,
-  DemoUserProfile,
+  BankUserProfile,
   formatMoney,
   ScheduledTransfer,
   transactionNotifications,
@@ -33,8 +33,8 @@ export type DashboardTab =
   | "settings";
 
 type Props = {
-  profile: DemoUserProfile;
-  onUpdateProfile: (updater: (prev: DemoUserProfile) => DemoUserProfile) => void;
+  profile: BankUserProfile;
+  onUpdateProfile: (updater: (prev: BankUserProfile) => BankUserProfile) => void;
   onGoPublicSite: () => void;
   onGoHelp: () => void;
   onSignOut: () => void;
@@ -48,7 +48,7 @@ export default function Dashboard({
   onSignOut,
 }: Props) {
   /** Adds large-transaction alerts whenever a handler writes new ledger entries. */
-  const onUpdateProfile = (updater: (prev: DemoUserProfile) => DemoUserProfile) => {
+  const onUpdateProfile = (updater: (prev: BankUserProfile) => BankUserProfile) => {
     updateProfile((prev) => {
       const next = updater(prev);
       if (next === prev || next.transactions === prev.transactions) return next;
@@ -61,6 +61,11 @@ export default function Dashboard({
     });
   };
   const [tab, setTab] = useState<DashboardTab>("summary");
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [tab]);
+
   const [selectedAccountId, setSelectedAccountId] = useState<string>("all");
   const [txQuery, setTxQuery] = useState("");
   const [txCat, setTxCat] = useState<string>("All");

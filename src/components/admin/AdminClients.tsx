@@ -14,7 +14,7 @@ import {
   downloadFile,
   todayIso,
 } from "../../banking/adminOps";
-import { AccountCategory, DemoUserProfile, formatMoney } from "../../banking/bankingTypes";
+import { AccountCategory, BankUserProfile, formatMoney } from "../../banking/bankingTypes";
 import { ArrowRight, LockIcon, SearchIcon } from "../icons";
 
 const emptyAccounts = (): NewClientAccountInput[] => [
@@ -74,7 +74,7 @@ export default function AdminClients({ ops, selectedKey, onSelectKey, onOpenTab,
     });
   }, [ops.users, query, segmentFilter]);
 
-  const totalsFor = (p: DemoUserProfile) => {
+  const totalsFor = (p: BankUserProfile) => {
     let assets = 0;
     let debts = 0;
     for (const a of p.accounts) {

@@ -1,7 +1,7 @@
-import type { DemoUserProfile } from "../banking/bankingTypes";
+import type { BankUserProfile } from "../banking/bankingTypes";
 import { isSupabaseConfigured, supabase } from "./supabase";
 
-export async function upsertProfile(profile: DemoUserProfile) {
+export async function upsertProfile(profile: BankUserProfile) {
   if (!isSupabaseConfigured) {
     return { ok: false, reason: "Supabase is not configured" };
   }

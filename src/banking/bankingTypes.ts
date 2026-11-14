@@ -210,7 +210,7 @@ export const INITIAL_BANK_CONFIG: GlobalBankConfig = {
   maintenanceBannerText: "Scheduled digital banking maintenance Sunday 2:00 AM – 4:00 AM ET.",
 };
 
-export type DemoUserProfile = {
+export type BankUserProfile = {
   id: PersonaId;
   accountKind?: "personal" | "business" | "wealth";
   status?: "active" | "frozen";
@@ -251,7 +251,7 @@ export type DemoUserProfile = {
   scheduled?: ScheduledTransfer[];
 };
 
-export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", DemoUserProfile> = {
+export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUserProfile> = {
   personal: {
     id: "personal",
     fullName: "Alex Tremblay",
@@ -905,7 +905,7 @@ export function formatMoney(amount: number, currency: "CAD" | "USD" = "CAD"): st
     maximumFractionDigits: 2,
   }).format(Math.abs(amount));
   const symbol = currency === "USD" ? "US$" : "$";
-  return amount < 0 ? `-${symbol}${numeric}` : `${symbol}${numeric}`;
+  return `${symbol}${numeric}`;
 }
 
 
@@ -927,7 +927,7 @@ const addDays = (iso: string, days: number) => {
 };
 
 export type ScheduleRunResult = {
-  profile: DemoUserProfile;
+  profile: BankUserProfile;
   executed: { description: string; amount: number; date: string }[];
   notifications: ClientNotification[];
 };
@@ -936,7 +936,7 @@ export type ScheduleRunResult = {
  * Executes every scheduled transfer whose due date has arrived.
  * Repeating schedules advance to their next occurrence; one-off schedules close.
  */
-export function runDueSchedules(profile: DemoUserProfile, today = new Date().toISOString().slice(0, 10)): ScheduleRunResult {
+export function runDueSchedules(profile: BankUserProfile, today = new Date().toISOString().slice(0, 10)): ScheduleRunResult {
   const scheduled = profile.scheduled ?? [];
   if (scheduled.length === 0) return { profile, executed: [], notifications: [] };
 
@@ -1037,7 +1037,7 @@ export function runDueSchedules(profile: DemoUserProfile, today = new Date().toI
 
 /** Generates alerts for a new transaction according to the client's preferences. */
 export function transactionNotifications(
-  profile: DemoUserProfile,
+  profile: BankUserProfile,
   txns: Transaction[]
 ): ClientNotification[] {
   const prefs = profile.preferences ?? DEFAULT_PREFERENCES;
