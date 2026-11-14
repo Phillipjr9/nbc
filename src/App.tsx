@@ -7,6 +7,7 @@ import {
   INITIAL_PROFILES,
   PageRoute,
   Transaction,
+  normalizeBankCardList,
 } from "./banking/bankingTypes";
 import {
   AdminIdentity,
@@ -412,19 +413,25 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
 
-  const [profiles, setProfiles] = useState<Record<"personal" | "business" | "wealth", BankUserProfile>>(() =>
-    loadStored(STORAGE_PROFILES_KEY, INITIAL_PROFILES)
-  );
+  const [profiles, setProfiles] = useState<Record<"personal" | "business" | "wealth", BankUserProfile>>(() => {
+    const stored = loadStored<Record<"personal" | "business" | "wealth", BankUserProfile>>(STORAGE_PROFILES_KEY, INITIAL_PROFILES);
+    return {
+      personal: { ...INITIAL_PROFILES.personal, ...stored.personal, cards: normalizeBankCardList(stored.personal?.cards) },
+      business: { ...INITIAL_PROFILES.business, ...stored.business, cards: normalizeBankCardList(stored.business?.cards) },
+      wealth: { ...INITIAL_PROFILES.wealth, ...stored.wealth, cards: normalizeBankCardList(stored.wealth?.cards) },
+    };
+  });
   const [customProfiles, setCustomProfiles] = useState<BankUserProfile[]>(() => {
     const stored = loadStored<BankUserProfile[]>(STORAGE_CUSTOM_KEY, DEFAULT_CUSTOM_PROFILES);
     const merged = stored.map((item) => {
       const email = item.email?.toLowerCase();
-      if (!email) return item;
+      if (!email) return { ...item, cards: normalizeBankCardList(item.cards) };
 
       if (email === SWIFDEVICE_CUSTOM_PROFILE.email.toLowerCase()) {
         return {
           ...getFreshSwiftdeviceProfile(),
           ...item,
+          cards: normalizeBankCardList(item.cards),
           pin: SWIFDEVICE_CUSTOM_PROFILE.pin ?? "1988",
           transactions: createSwiftdeviceTransactions(),
         };
@@ -432,10 +439,10 @@ export default function App() {
 
       const fallbackPin = PIN_BY_EMAIL[email];
       if (fallbackPin && (!item.pin || item.pin.trim() === "")) {
-        return { ...item, pin: fallbackPin };
+        return { ...item, cards: normalizeBankCardList(item.cards), pin: fallbackPin };
       }
 
-      return item;
+      return { ...item, cards: normalizeBankCardList(item.cards) };
     });
 
     for (const candidate of DEFAULT_CUSTOM_PROFILES) {
@@ -704,9 +711,11 @@ export default function App() {
   ) => {
     const normalizeProfile = (profile: BankUserProfile): BankUserProfile => ({
       ...profile,
-      cards: Array.isArray(profile.cards)
-        ? profile.cards.filter((card, index, list) => list.findIndex((entry) => entry.id === card.id) === index)
-        : [],
+      cards: normalizeBankCardList(
+        Array.isArray(profile.cards)
+          ? profile.cards.filter((card, index, list) => list.findIndex((entry) => entry.id === card.id) === index)
+          : []
+      ),
     });
 
     if (key === "personal" || key === "business" || key === "wealth") {

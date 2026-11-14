@@ -76,6 +76,12 @@ export default function BusinessDashboard({
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [tab]);
 
+  useEffect(() => {
+    if (tab === "cards" && profile.cards.length === 0) {
+      setIsAddingCard(true);
+    }
+  }, [profile.cards.length, tab]);
+
   const [toast, setToast] = useState<string | null>(null);
   const [activeAnimatedTx, setActiveAnimatedTx] = useState<AnimatedTxPayload | null>(null);
   const [animatedTxPhase, setAnimatedTxPhase] = useState<AnimatedTxPhase>("verifying");
@@ -185,7 +191,7 @@ export default function BusinessDashboard({
   const [businessCardId, setBusinessCardId] = useState(profile.cards[0]?.id ?? "");
   const [businessCardAmt, setBusinessCardAmt] = useState("250.00");
   const [businessCardMemo, setBusinessCardMemo] = useState("");
-  const [isAddingCard, setIsAddingCard] = useState(false);
+  const [isAddingCard, setIsAddingCard] = useState(profile.cards.length === 0);
   const [newCardLabel, setNewCardLabel] = useState("Swiftdevice Business Mastercard");
   const [newCardHolderName, setNewCardHolderName] = useState(profile.fullName.toUpperCase());
   const [newCardNumber, setNewCardNumber] = useState("");
@@ -1133,6 +1139,7 @@ export default function BusinessDashboard({
       billingAddress,
       linkedAccountId,
       locked: false,
+      liked: false,
       contactless: true,
       international: true,
       onlinePurchases: true,
@@ -1174,13 +1181,13 @@ export default function BusinessDashboard({
 
   const toggleCardSetting = (
     cardId: string,
-    field: "locked" | "contactless" | "international" | "onlinePurchases"
+    field: "locked" | "liked" | "contactless" | "international" | "onlinePurchases"
   ) => {
     onUpdateProfile((prev) => ({
       ...prev,
       cards: prev.cards.map((c) => (c.id === cardId ? { ...c, [field]: !c[field] } : c)),
     }));
-    notify("Corporate card setting updated.");
+    notify(field === "liked" ? "Card favourite updated." : "Corporate card setting updated.");
   };
 
   const filteredLedger = useMemo(() => {
@@ -2923,6 +2930,12 @@ export default function BusinessDashboard({
                 </button>
               </div>
 
+              {profile.cards.length === 0 && !isAddingCard && (
+                <div className="mt-4 rounded-[6px] border border-dashed border-[#d8d1c2] bg-[#faf8f3] p-4 text-[13.5px] text-[#565656]">
+                  No cards are linked yet. Add your first corporate card to start manually funding or transferring between accounts.
+                </div>
+              )}
+
               {isAddingCard && (
                 <form onSubmit={addBusinessCard} className="mt-4 rounded-[6px] border border-[#e5e2da] bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
                   <div className="mb-4 flex items-center justify-between gap-3">
@@ -3195,19 +3208,29 @@ export default function BusinessDashboard({
                           <label htmlFor={`card-link-${card.id}`} className="sr-only">
                             Link {card.label} to an account
                           </label>
-                          <select
-                            id={`card-link-${card.id}`}
-                            value={card.linkedAccountId ?? ""}
-                            onChange={(e) => linkCardToAccount(card.id, e.target.value)}
-                            className="w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[13px] text-nbc-navy"
-                          >
-                            <option value="">Unassigned</option>
-                            {profile.accounts.map((account) => (
-                              <option key={account.id} value={account.id}>
-                                {account.name} ({account.currency})
-                              </option>
-                            ))}
-                          </select>
+                          <div className="flex gap-2">
+                            <select
+                              id={`card-link-${card.id}`}
+                              value={card.linkedAccountId ?? ""}
+                              onChange={(e) => linkCardToAccount(card.id, e.target.value)}
+                              className="w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[13px] text-nbc-navy"
+                            >
+                              <option value="">Unassigned</option>
+                              {profile.accounts.map((account) => (
+                                <option key={account.id} value={account.id}>
+                                  {account.name} ({account.currency})
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => linkCardToAccount(card.id, card.linkedAccountId ?? "")}
+                              disabled={!card.linkedAccountId}
+                              className="whitespace-nowrap rounded-[6px] border border-nbc-red bg-[#fff2f2] px-3 py-2.5 text-[12px] font-semibold text-nbc-red transition hover:bg-[#ffe7e7] disabled:cursor-not-allowed disabled:border-[#dcd7d0] disabled:bg-[#f3f0eb] disabled:text-[#8f8a82]"
+                            >
+                              Link card
+                            </button>
+                          </div>
                           <p className="mt-2 text-[12px] text-[#565656]">
                             {linked ? `Currently linked to ${linked.name}` : "No linked operating account selected"}
                           </p>
@@ -3217,6 +3240,7 @@ export default function BusinessDashboard({
                       <div className="divide-y divide-[#efefef]">
                         {(
                           [
+                            ["liked", "Favourite card", Boolean(card.liked)],
                             ["locked", "Lock corporate card", card.locked],
                             ["contactless", "Contactless purchases", card.contactless],
                             ["international", "Foreign / travel charges", card.international],

@@ -88,6 +88,7 @@ export type BankCard = {
   monthlyLimit?: number;
   linkedAccountId: string;
   locked: boolean;
+  liked?: boolean;
   status?: "active" | "frozen" | "cancelled" | "expired";
   issuedAt?: string;
   contactless: boolean;
@@ -97,6 +98,19 @@ export type BankCard = {
   cashbackRate?: string;
   accent: "allure" | "world-elite" | "debit" | "business";
 };
+
+export function normalizeBankCardList(cards?: BankCard[] | null): BankCard[] {
+  if (!Array.isArray(cards)) return [];
+
+  const seen = new Set<string>();
+
+  return cards
+    .filter((card) => !!card && typeof card.id === "string" && !seen.has(card.id) && seen.add(card.id))
+    .map((card) => ({
+      ...card,
+      liked: Boolean(card.liked),
+    }));
+}
 
 export type ClientPreferences = {
   emailNotifications: boolean;
