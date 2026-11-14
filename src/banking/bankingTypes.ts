@@ -106,8 +106,9 @@ export function normalizeBankCardList(cards?: BankCard[] | null): BankCard[] {
 
   return cards
     .filter((card) => !!card && typeof card.id === "string" && !seen.has(card.id) && seen.add(card.id))
-    .map((card) => ({
+    .map(({ number: _number, cvv: _cvv, ...card }) => ({
       ...card,
+      last4: String(card.last4 ?? "").replace(/\D/g, "").slice(-4),
       liked: Boolean(card.liked),
     }));
 }
@@ -505,7 +506,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         network: "Mastercard",
         last4: "4829",
         expiry: "09/29",
-        cvv: "418",
+
         cardholderName: "ALEX TREMBLAY",
         monthlyLimit: 5000,
         linkedAccountId: "crd-1",
@@ -525,7 +526,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         network: "Debit",
         last4: "1904",
         expiry: "04/28",
-        cvv: "207",
+
         cardholderName: "ALEX TREMBLAY",
         monthlyLimit: 3000,
         linkedAccountId: "chk-1",
@@ -709,7 +710,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         network: "Mastercard",
         last4: "7710",
         expiry: "11/28",
-        cvv: "842",
+
         cardholderName: "ATELIER NORD — EXEC",
         monthlyLimit: 35000,
         linkedAccountId: "biz-crd",
@@ -729,7 +730,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         network: "Mastercard",
         last4: "3398",
         expiry: "08/29",
-        cvv: "519",
+
         cardholderName: "MARC DUPONT — OPS",
         monthlyLimit: 15000,
         linkedAccountId: "biz-crd",

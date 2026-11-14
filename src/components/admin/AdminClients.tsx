@@ -704,7 +704,7 @@ function SelectedClientDetails({
                   </div>
                   <p className="mt-1 text-[12px] text-[#565656]">{card.network} •••• {card.last4}</p>
                   <p className="mt-1 text-[12px] text-[#565656]">Cardholder: {card.cardholderName || "—"}</p>
-                  <p className="mt-1 text-[12px] text-[#565656]">Card number: {card.number ? card.number.replace(/(.{4})/g, "$1 ").trim() : `•••• •••• •••• ${card.last4}`}</p>
+                  <p className="mt-1 text-[12px] text-[#565656]">Card number: {`•••• •••• •••• ${card.last4}`}</p>
                   <p className="mt-1 text-[12px] text-[#565656]">Linked account: {linked?.name ?? "Unassigned"}</p>
                   <p className="mt-1 text-[12px] text-[#565656]">Expiry: {card.expiry}</p>
                   <p className="mt-1 text-[12px] text-[#565656]">Billing address: {card.billingAddress || "—"}</p>

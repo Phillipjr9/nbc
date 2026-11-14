@@ -27,8 +27,6 @@ import ProductPages from "./components/ProductPages";
 import SearchDialog from "./components/SearchDialog";
 import { AdviceSection, HelpSection, Hero, PromoSection, ServicesSection } from "./components/Sections";
 import SupportPages from "./components/SupportPages";
-import { fetchProfiles, upsertProfile } from "./lib/profileSync";
-import { isSupabaseConfigured } from "./lib/supabase";
 
 const STORAGE_PROFILES_KEY = "nbc_profiles_v1";
 const STORAGE_CUSTOM_KEY = "nbc_custom_profiles_v1";
@@ -95,6 +93,7 @@ export default function App() {
   const [route, setRoute] = useState<PageRoute>(() => hashToRoute(window.location.hash));
   const [searchOpen, setSearchOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [profileSaveErrors, setProfileSaveErrors] = useState({ builtIn: false, custom: false });
 
   const [profiles, setProfiles] = useState<Record<"personal" | "business" | "wealth", BankUserProfile>>(() => {
     const stored = loadStored<Record<"personal" | "business" | "wealth", BankUserProfile>>(STORAGE_PROFILES_KEY, INITIAL_PROFILES);
@@ -108,44 +107,6 @@ export default function App() {
     const stored = loadStored<BankUserProfile[]>(STORAGE_CUSTOM_KEY, []);
     return sanitizeCustomProfiles(Array.isArray(stored) ? stored : []);
   });
-  useEffect(() => {
-    if (!isSupabaseConfigured) return;
-
-    let isMounted = true;
-
-    void (async () => {
-      try {
-        const remoteProfiles = await fetchProfiles();
-        if (!isMounted || remoteProfiles.length === 0) return;
-
-        setCustomProfiles((prev) => {
-          const merged = [...prev];
-
-          for (const remote of remoteProfiles) {
-            const index = merged.findIndex((entry) => entry.email.toLowerCase() === remote.email.toLowerCase());
-            if (index >= 0) {
-              merged[index] = {
-                ...merged[index],
-                ...remote,
-                pin: remote.pin || merged[index].pin || "1988",
-              };
-            } else {
-              merged.push(remote);
-            }
-          }
-
-          return merged;
-        });
-      } catch (error) {
-        console.warn("Supabase profile sync skipped:", error);
-      }
-    })();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
   const [activeProfileKey, setActiveProfileKey] = useState<string | null>(() => {
     const persisted = loadStored<string | null>(STORAGE_SESSION_KEY, null);
     const cookieSession = readCookie(STORAGE_SESSION_COOKIE_KEY);
@@ -154,7 +115,7 @@ export default function App() {
   const [cookieConsent, setCookieConsent] = useState<boolean>(() => {
     const localConsent = loadStored<boolean | null>(STORAGE_COOKIE_CONSENT_KEY, null);
     const cookieConsentValue = readCookie(STORAGE_COOKIE_CONSENT_KEY);
-    return localConsent ?? cookieConsentValue === "accepted" ?? false;
+    return localConsent ?? (cookieConsentValue === "accepted");
   });
   const [adminAuth, setAdminAuth] = useState<boolean>(() =>
     loadStored<boolean>(STORAGE_ADMIN_AUTH_KEY, false)
@@ -197,17 +158,21 @@ export default function App() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(profiles));
+      window.localStorage.setItem(STORAGE_PROFILES_KEY, JSON.stringify(Object.fromEntries(
+        Object.entries(profiles).map(([key, profile]) => [key, { ...profile, cards: normalizeBankCardList(profile.cards) }])
+      )));
+      setProfileSaveErrors((prev) => prev.builtIn ? { ...prev, builtIn: false } : prev);
     } catch {
-      // ignore
+      setProfileSaveErrors((prev) => prev.builtIn ? prev : { ...prev, builtIn: true });
     }
   }, [profiles]);
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(STORAGE_CUSTOM_KEY, JSON.stringify(customProfiles));
+      window.localStorage.setItem(STORAGE_CUSTOM_KEY, JSON.stringify(sanitizeCustomProfiles(customProfiles)));
+      setProfileSaveErrors((prev) => prev.custom ? { ...prev, custom: false } : prev);
     } catch {
-      // ignore
+      setProfileSaveErrors((prev) => prev.custom ? prev : { ...prev, custom: true });
     }
   }, [customProfiles]);
 
@@ -311,29 +276,6 @@ export default function App() {
     }
     return customProfiles.find((c) => c.email.toLowerCase() === activeProfileKey.toLowerCase()) ?? null;
   }, [activeProfileKey, profiles, customProfiles]);
-
-  useEffect(() => {
-    if (!activeProfile) return;
-
-    let isMounted = true;
-
-    void (async () => {
-      try {
-        const result = await upsertProfile(activeProfile);
-        if (!isMounted) return;
-
-        if (result && "ok" in result && result.ok) {
-          console.info("Profile synced to Supabase", activeProfile.email);
-        }
-      } catch (error) {
-        console.warn("Profile sync skipped:", error);
-      }
-    })();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [activeProfile]);
 
   const activeDashboardRoute: PageRoute = useMemo(() => {
     if (activeProfile && isBusinessProfile(activeProfile)) {
@@ -662,6 +604,11 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen flex-col bg-white font-sans text-nbc-ink">
+      {(profileSaveErrors.builtIn || profileSaveErrors.custom) && (
+        <div role="alert" className="bg-red-100 px-4 py-2 text-center text-sm font-semibold text-red-900">
+          Profile changes could not be saved in this browser. Check browser storage and try again.
+        </div>
+      )}
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[100] focus:rounded-full focus:bg-nbc-navy focus:px-5 focus:py-3 focus:text-sm focus:font-semibold focus:text-white"
@@ -747,6 +694,9 @@ export default function App() {
           />
 
           <main id="main-content" className="flex-1">
+            {isAuthRoute && (
+              <p className="px-4 py-2 text-center text-sm text-[#565656]">This sign-in is a simulation. Do not enter real credentials.</p>
+            )}
             {route.kind === "home" && (
               <>
                 <Hero onNavigate={navigate} />

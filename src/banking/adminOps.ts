@@ -534,7 +534,6 @@ export function buildManagedProfile(input: NewClientInput): BankUserProfile {
       network: input.card.network,
       last4: randomDigits(4),
       expiry: "05/30",
-      cvv: randomDigits(3),
       cardholderName: input.fullName.toUpperCase().slice(0, 28),
       monthlyLimit: input.card.limit,
       linkedAccountId: creditAcc?.id ?? cheque.id,

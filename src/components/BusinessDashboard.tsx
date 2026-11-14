@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   logoNbc,
+  logoBnMark,
   pictoCarteCreditRed,
   pictoComptesRed,
   pictoEmpruntsRed,
@@ -8,6 +9,8 @@ import {
 } from "../assets/nbcAssets";
 import {
   BusinessInvoice,
+  BankCard,
+  Transaction,
   BankUserProfile,
   DEFAULT_PREFERENCES,
   EmployeePayrollItem,
@@ -15,7 +18,7 @@ import {
   FX_RATES,
   TRANSFER_FAILURE_REASONS,
 } from "../banking/bankingTypes";
-import { round2 } from "../banking/adminOps";
+import { randomDigits, round2 } from "../banking/adminOps";
 import BankCardVisual from "./BankCardVisual";
 import { ArrowRight, HelpIcon, LockIcon, SearchIcon } from "./icons";
 import TransactionSendOverlay, {
@@ -77,10 +80,8 @@ export default function BusinessDashboard({
   }, [tab]);
 
   useEffect(() => {
-    if (tab === "cards" && profile.cards.length === 0) {
-      setIsAddingCard(true);
-    }
-  }, [profile.cards.length, tab]);
+    setTab(initialTab);
+  }, [initialTab]);
 
   const [toast, setToast] = useState<string | null>(null);
   const [activeAnimatedTx, setActiveAnimatedTx] = useState<AnimatedTxPayload | null>(null);
@@ -191,14 +192,19 @@ export default function BusinessDashboard({
   const [businessCardId, setBusinessCardId] = useState(profile.cards[0]?.id ?? "");
   const [businessCardAmt, setBusinessCardAmt] = useState("250.00");
   const [businessCardMemo, setBusinessCardMemo] = useState("");
-  const [isAddingCard, setIsAddingCard] = useState(profile.cards.length === 0);
+  const [isAddingCard, setIsAddingCard] = useState(false);
   const [newCardLabel, setNewCardLabel] = useState("Business Mastercard");
   const [newCardHolderName, setNewCardHolderName] = useState(profile.fullName.toUpperCase());
   const [newCardNumber, setNewCardNumber] = useState("");
   const [newCardExpiry, setNewCardExpiry] = useState("07/29");
-  const [newCardCvv, setNewCardCvv] = useState("");
   const [newCardBillingAddress, setNewCardBillingAddress] = useState(profile.address ?? "");
   const [newCardLinkedAccountId, setNewCardLinkedAccountId] = useState(operatingAccounts[0]?.id ?? profile.accounts[0]?.id ?? "");
+
+  useEffect(() => {
+    if (tab === "cards" && isAddingCard) {
+      document.getElementById("add-corporate-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [tab, isAddingCard]);
 
   // Ledger filters
   const [ledgerAcc, setLedgerAcc] = useState("all");
@@ -948,7 +954,7 @@ export default function BusinessDashboard({
     if (profile.status === "frozen" || !!profile.transfersPaused) {
       recordFailedTransfer({
         accountId: cardFundingSourceId || operatingAccounts[0]?.id || profile.accounts[0]?.id || "",
-        description: `Card ${cardTransferType === "from-card" ? "add funds from card" : cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
+        description: `Card ${cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
         amount: Number(businessCardAmt) || 0,
         reason: profile.status === "frozen" ? "Account is frozen or restricted" : "User transfer paused by administration",
         details: profile.transferPauseReason ?? "Card transfer processing is blocked pending review.",
@@ -968,7 +974,7 @@ export default function BusinessDashboard({
     if (!card) {
       recordFailedTransfer({
         accountId: cardFundingSourceId || profile.accounts[0]?.id || "",
-        description: `Card ${cardTransferType === "from-card" ? "add funds from card" : cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
+        description: `Card ${cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
         amount: amt,
         reason: "Invalid account number or routing details",
         details: "No valid corporate card was selected for this transfer.",
@@ -980,7 +986,7 @@ export default function BusinessDashboard({
     if (!targetAccount) {
       recordFailedTransfer({
         accountId: profile.accounts[0]?.id ?? "",
-        description: `Card ${cardTransferType === "from-card" ? "add funds from card" : cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
+        description: `Card ${cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
         amount: amt,
         reason: "Invalid account number or routing details",
         details: "No valid account was selected for the card transfer.",
@@ -992,7 +998,7 @@ export default function BusinessDashboard({
     if (!amt || amt <= 0) {
       recordFailedTransfer({
         accountId: targetAccount.id,
-        description: `Card ${cardTransferType === "from-card" ? "add funds from card" : cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
+        description: `Card ${cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
         amount: 0,
         reason: "Transfer exceeds daily or per-payment limit",
         details: "The transfer amount must be greater than zero.",
@@ -1051,7 +1057,7 @@ export default function BusinessDashboard({
     if ((src.category === "chequing" || src.category === "savings") && src.balance < amt) {
       recordFailedTransfer({
         accountId: src.id,
-        description: `Card ${cardTransferType === "from-card" ? "add funds from card" : cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
+        description: `Card ${cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
         amount: amt,
         reason: "Insufficient funds",
         details: `Card transfer attempted above available balance for ${src.name}.`,
@@ -1111,8 +1117,8 @@ export default function BusinessDashboard({
     const linkedAccountId = newCardLinkedAccountId || fallbackAccountId;
     const billingAddress = newCardBillingAddress.trim();
 
-    if (!normalizedCardNumber || normalizedCardNumber.length < 12) {
-      notify("Enter the full card number to add the card.");
+    if (normalizedCardNumber.length !== 4) {
+      notify("Enter exactly the last four digits of the demo card.");
       return;
     }
 
@@ -1131,10 +1137,8 @@ export default function BusinessDashboard({
       id: `biz-card-${Date.now()}`,
       label: newCardLabel.trim() || "Business Mastercard",
       network: "Mastercard" as const,
-      number: normalizedCardNumber,
       last4: normalizedLast4,
       expiry: newCardExpiry || "07/29",
-      cvv: newCardCvv || "000",
       cardholderName: (newCardHolderName || profile.fullName).toUpperCase(),
       billingAddress,
       linkedAccountId,
@@ -1161,7 +1165,6 @@ export default function BusinessDashboard({
     setNewCardHolderName(profile.fullName.toUpperCase());
     setNewCardNumber("");
     setNewCardExpiry("07/29");
-    setNewCardCvv("");
     setNewCardBillingAddress(profile.address ?? "");
     setNewCardLinkedAccountId(fallbackAccountId || "");
     notify("New corporate card was added to the account.");
@@ -1354,6 +1357,21 @@ export default function BusinessDashboard({
       )}
 
       <main className="nbc-container pt-8">
+        <p className="mb-4 text-[13px] text-[#565656]">Transactions are simulated. Profile changes are stored only in this browser.</p>
+        {tab !== "cards" && (
+          <div className="mb-5 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setIsAddingCard(true);
+                setTab("cards");
+              }}
+              className="nbc-btn nbc-btn-primary"
+            >
+              Link a card
+            </button>
+          </div>
+        )}
         {!tab.includes("settings") && (
           <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-[#e5e2da] pb-5">
             <div className="min-w-0">
@@ -2456,6 +2474,13 @@ export default function BusinessDashboard({
                             </option>
                           ))}
                         </select>
+                        <button
+                          type="button"
+                          onClick={() => { setIsAddingCard(true); setTab("cards"); }}
+                          className="mt-2 font-semibold text-[#1572c5] underline underline-offset-2 hover:text-nbc-navy"
+                        >
+                          + Link a card
+                        </button>
                       </div>
 
                       <div>
@@ -2914,7 +2939,7 @@ export default function BusinessDashboard({
             </div>
 
             <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-              <div className="flex items-center justify-between gap-3 border-b border-[#ece8df] pb-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ece8df] pb-4">
                 <div>
                   <h3 className="text-[18px] font-bold text-nbc-navy">Card funding and transfers</h3>
                   <p className="mt-1 text-[13px] text-[#565656]">
@@ -2926,7 +2951,7 @@ export default function BusinessDashboard({
                   onClick={() => setIsAddingCard((prev) => !prev)}
                   className="rounded-full border border-[#c9c3b6] bg-[#f8f6f1] px-3 py-2 text-[12.5px] font-semibold text-nbc-navy transition hover:bg-[#efeae1]"
                 >
-                  {isAddingCard ? "Cancel" : "+ Add another card"}
+                  {isAddingCard ? "Cancel" : profile.cards.length === 0 ? "+ Link a card" : "+ Link another card"}
                 </button>
               </div>
 
@@ -2937,14 +2962,14 @@ export default function BusinessDashboard({
               )}
 
               {isAddingCard && (
-                <form onSubmit={addBusinessCard} className="mt-4 rounded-[6px] border border-[#e5e2da] bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+                <form id="add-corporate-card" onSubmit={addBusinessCard} className="mt-4 scroll-mt-32 rounded-[6px] border border-[#e5e2da] bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
                   <div className="mb-4 flex items-center justify-between gap-3">
                     <h4 className="text-[16px] font-bold text-nbc-navy">Add a corporate card</h4>
                     <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#565656]">New card</span>
                   </div>
 
                   <p className="mb-4 text-[12.5px] text-[#565656]">
-                    Enter the full card details below and link the card to the operating account it should use for transfers and funding.
+                    Demo only: add a card reference using its last four digits. This does not connect a real card or move money.
                   </p>
 
                   <div className="grid gap-4 md:grid-cols-2">
@@ -2969,14 +2994,14 @@ export default function BusinessDashboard({
                       />
                     </div>
                     <div>
-                      <label htmlFor="new-card-number" className="block text-[13px] font-semibold text-[#121212]">Card number</label>
+                      <label htmlFor="new-card-number" className="block text-[13px] font-semibold text-[#121212]">Card last four digits</label>
                       <input
                         id="new-card-number"
                         type="text"
                         inputMode="numeric"
-                        maxLength={19}
+                        maxLength={4}
                         value={newCardNumber}
-                        onChange={(e) => setNewCardNumber(e.target.value.replace(/\D/g, "").slice(0, 19))}
+                        onChange={(e) => setNewCardNumber(e.target.value.replace(/\D/g, "").slice(0, 4))}
                         className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
                       />
                     </div>
@@ -2988,18 +3013,6 @@ export default function BusinessDashboard({
                         value={newCardExpiry}
                         onChange={(e) => setNewCardExpiry(e.target.value)}
                         placeholder="07/29"
-                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="new-card-cvv" className="block text-[13px] font-semibold text-[#121212]">CVV</label>
-                      <input
-                        id="new-card-cvv"
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={4}
-                        value={newCardCvv}
-                        onChange={(e) => setNewCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
                         className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
                       />
                     </div>
@@ -3078,6 +3091,19 @@ export default function BusinessDashboard({
                           </option>
                         ))}
                       </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (tab === "cards" && isAddingCard) {
+                            document.getElementById("add-corporate-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          }
+                          setIsAddingCard(true);
+                          setTab("cards");
+                        }}
+                        className="mt-2 font-semibold text-[#1572c5] underline underline-offset-2 hover:text-nbc-navy"
+                      >
+                        + Link a card
+                      </button>
                     </div>
 
                     <div>
@@ -3179,7 +3205,7 @@ export default function BusinessDashboard({
                           <div>
                             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.06em] text-[#565656]">Number</span>
                             <p className="rounded-[6px] border border-[#e5e2da] bg-white px-3 py-2 text-[13px] text-[#121212]">
-                              {card.number ? card.number.replace(/(.{4})/g, "$1 ").trim() : `•••• •••• •••• ${card.last4}`}
+                              {`•••• •••• •••• ${card.last4}`}
                             </p>
                           </div>
                           <label className="block">

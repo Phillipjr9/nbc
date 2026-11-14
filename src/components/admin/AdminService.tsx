@@ -8,10 +8,9 @@ import {
   downloadFile,
   newId,
   randomDigits,
-  round2,
   todayIso,
 } from "../../banking/adminOps";
-import { BankCard, GlobalBankConfig, formatMoney } from "../../banking/bankingTypes";
+import { BankCard, GlobalBankConfig } from "../../banking/bankingTypes";
 import BankCardVisual from "../BankCardVisual";
 import { Field, inputCls } from "./AdminClients";
 
@@ -20,9 +19,8 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
   const entry = ops.users.find((u) => u.key === targetKey) ?? ops.users.find((u) => u.key === selectedKey) ?? ops.users[0];
   const [templateIdx, setTemplateIdx] = useState(0);
   const [label, setLabel] = useState(CARD_TEMPLATES[0].label);
-  const [cardNumber, setCardNumber] = useState(randomDigits(16));
+  const [cardNumber, setCardNumber] = useState(randomDigits(4));
   const [cardExpiry, setCardExpiry] = useState("05/30");
-  const [cardCvv, setCardCvv] = useState(randomDigits(3));
   const [billingAddress, setBillingAddress] = useState(entry?.profile.address ?? "");
   const [points, setPoints] = useState(String(CARD_TEMPLATES[0].points));
   const [filterKey, setFilterKey] = useState("all");
@@ -41,16 +39,17 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
     const template = CARD_TEMPLATES[templateIdx];
     const linked =
       entry.profile.accounts.find((a) => a.category === "credit") ?? entry.profile.accounts[0];
-    const fullCardNumber = cardNumber.replace(/\D/g, "").slice(0, 19);
-    const normalizedLast4 = fullCardNumber.slice(-4) || randomDigits(4);
+    const normalizedLast4 = cardNumber.replace(/\D/g, "");
+    if (normalizedLast4.length !== 4) {
+      ops.notify("Enter exactly four digits for the demo card reference.");
+      return;
+    }
     const card: BankCard = {
       id: newId("card"),
       label: label.trim() || template.label,
       network: template.network,
-      number: fullCardNumber,
       last4: normalizedLast4,
       expiry: cardExpiry || "05/30",
-      cvv: cardCvv || randomDigits(3),
       cardholderName: entry.profile.fullName.toUpperCase().slice(0, 28),
       billingAddress: billingAddress.trim() || entry.profile.address || "Not provided",
       linkedAccountId: linked?.id ?? "",
@@ -100,9 +99,8 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
           </select>
         </Field>
         <Field label="Cardholder label"><input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} /></Field>
-        <Field label="Card number"><input className={inputCls} value={cardNumber} onChange={(e) => setCardNumber(e.target.value.replace(/\D/g, "").slice(0, 19))} /></Field>
+        <Field label="Card last four digits"><input className={inputCls} inputMode="numeric" maxLength={4} value={cardNumber} onChange={(e) => setCardNumber(e.target.value.replace(/\D/g, "").slice(0, 4))} /></Field>
         <Field label="Expiry"><input className={inputCls} value={cardExpiry} onChange={(e) => setCardExpiry(e.target.value)} placeholder="05/30" /></Field>
-        <Field label="CVV"><input className={inputCls} value={cardCvv} onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))} /></Field>
         <Field label="Billing address"><input className={inputCls} value={billingAddress ?? ""} onChange={(e) => setBillingAddress(e.target.value)} placeholder="1200 Rue Sainte-Catherine" /></Field>
         <Field label="Opening points"><input className={inputCls} type="number" min="0" value={points} onChange={(e) => setPoints(e.target.value)} /></Field>
         <div className="flex items-end">
@@ -139,9 +137,8 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
               </div>
               <BankCardVisual card={card} holderName={holder} compact />
               <div className="mt-3 space-y-1.5 text-[11.5px] text-[#565656]">
-                <p><strong className="text-[#121212]">Card number:</strong> {card.number ? card.number.replace(/(.{4})/g, "$1 ").trim() : `•••• •••• •••• ${card.last4}`}</p>
+                <p><strong className="text-[#121212]">Card number:</strong> {`•••• •••• •••• ${card.last4}`}</p>
                 <p><strong className="text-[#121212]">Expiry:</strong> {card.expiry}</p>
-                <p><strong className="text-[#121212]">CVV:</strong> {card.cvv ?? "—"}</p>
                 <p><strong className="text-[#121212]">Billing address:</strong> {card.billingAddress || "—"}</p>
               </div>
               <div className="mt-3 flex flex-wrap gap-1.5">

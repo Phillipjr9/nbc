@@ -1098,6 +1098,7 @@ export default function Dashboard({
       )}
 
       <main className="nbc-container pt-8">
+        <p className="mb-4 text-[13px] text-[#565656]">Transactions are simulated. Profile changes are stored only in this browser.</p>
         {(profile.status === "frozen" || profile.transfersPaused) && (
           <div className="mb-6 rounded-[6px] border border-[#f1b0b7] bg-[#fff5f5] px-5 py-4 text-[14px] text-[#842029]">
             <strong className="font-semibold">Account notice:</strong>{" "}

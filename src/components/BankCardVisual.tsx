@@ -127,26 +127,10 @@ function MastercardCircles() {
 
 export default function BankCardVisual({ card, holderName, compact = false }: Props) {
   const [flipped, setFlipped] = useState(false);
-  const [revealNumber, setRevealNumber] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const style = TIER_STYLES[card.accent];
   const displayName = card.cardholderName || holderName;
-  const normalizedCardNumber = card.number?.replace(/\D/g, "") ?? "";
-  const fullNumber = normalizedCardNumber ? normalizedCardNumber.replace(/(.{4})/g, "$1 ").trim() : `${style.binPrefix} ${card.last4}`;
-  const maskedNumber = normalizedCardNumber ? normalizedCardNumber.replace(/.(?=.{4})/g, "•").replace(/(.{4})/g, "$1 ").trim() : `${style.binPrefix.slice(0, 4)}  ••••  ••••  ${card.last4}`;
-  const cvv = card.cvv || "742";
-
-  const handleCopy = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      navigator.clipboard?.writeText(fullNumber.replace(/\s+/g, ""));
-    } catch {
-      // ignore clipboard restrictions
-    }
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
-  };
+  const maskedNumber = `••••  ••••  ••••  ${card.last4}`;
 
   return (
     <div className="space-y-2.5">
@@ -232,7 +216,7 @@ export default function BankCardVisual({ card, holderName, compact = false }: Pr
                     : "text-[14px] tracking-[0.1em] sm:text-[16px] sm:tracking-[0.14em] lg:text-[18px]"
                 }`}
               >
-                {revealNumber ? fullNumber : maskedNumber}
+                {maskedNumber}
               </p>
             </div>
 
@@ -289,7 +273,7 @@ export default function BankCardVisual({ card, holderName, compact = false }: Pr
                 <div className="flex h-9 w-20 flex-col items-center justify-center rounded-[4px] bg-white px-2 text-nbc-navy">
                   <span className="text-[8px] font-bold uppercase tracking-wider text-[#777]">CVC / CVV</span>
                   <span className="font-mono text-[13px] font-bold tracking-widest">
-                    {revealNumber ? cvv : "•••"}
+                    •••
                   </span>
                 </div>
               </div>
@@ -324,28 +308,13 @@ export default function BankCardVisual({ card, holderName, compact = false }: Pr
       {/* Interactive Card Action Strip (Reveal / Copy / Flip Back) */}
       {!compact && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-[8px] border border-[#e7e3d8] bg-[#faf8f3] px-3.5 py-2 text-[12px]">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setRevealNumber((v) => !v)}
-              className="rounded-full bg-white px-3 py-1 font-semibold text-nbc-navy shadow-xs ring-1 ring-[#dedad0] transition hover:text-nbc-red"
-            >
-              {revealNumber ? "Hide Details" : "Reveal Number & CVV"}
-            </button>
-            <button
-              type="button"
-              onClick={handleCopy}
-              className="rounded-full bg-white px-3 py-1 font-semibold text-nbc-navy shadow-xs ring-1 ring-[#dedad0] transition hover:text-nbc-red"
-            >
-              {copied ? "✓ Copied!" : "Copy #"}
-            </button>
-          </div>
+          <span>Only the last four digits are displayed</span>
           <button
             type="button"
             onClick={() => setFlipped((v) => !v)}
             className="font-semibold text-[#1572c5] hover:underline"
           >
-            {flipped ? "← Show Front" : "Flip for CVV →"}
+            {flipped ? "← Show Front" : "Show back →"}
           </button>
         </div>
       )}
