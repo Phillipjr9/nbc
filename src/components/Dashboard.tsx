@@ -136,6 +136,10 @@ export default function Dashboard({
   const [cardMemo, setCardMemo] = useState("");
   const [linkedAccountId, setLinkedAccountId] = useState("");
 
+  // Link card mode state
+  const [linkCardSelectedId, setLinkCardSelectedId] = useState("");
+  const [linkCardAccountId, setLinkCardAccountId] = useState("");
+
   // Scheduled / recurring transfers
   const [schFromId, setSchFromId] = useState(sourceAccounts[0]?.id ?? "");
   const [schToId, setSchToId] = useState(profile.accounts[1]?.id ?? "");
@@ -1876,6 +1880,7 @@ export default function Dashboard({
               {(
                 [
                   ["internal", "Between my accounts"],
+                  ["link-card", "Link a card"],
                   ["card", "Card transfer"],
                   ["etransfer", "Interac e-Transfer®"],
                   ["bills", "Pay a bill"],
@@ -1896,6 +1901,92 @@ export default function Dashboard({
                 </button>
               ))}
             </div>
+
+            {moveMode === "link-card" && (
+              <div className="max-w-[720px] space-y-5 rounded-[6px] border border-[#e5e2da] bg-white p-6">
+                <div>
+                  <h2 className="text-[20px] font-bold text-nbc-navy">Link a card to your account</h2>
+                  <p className="mt-1 text-[14px] text-[#565656]">
+                    Connect a card to one of your accounts so you can transfer funds and manage spending.
+                  </p>
+                </div>
+
+                {profile.cards.length === 0 ? (
+                  <div className="rounded-[6px] border border-dashed border-[#b9b2a3] bg-[#fcfbf8] p-6 text-center">
+                    <p className="text-[14px] text-[#565656]">No cards on file.</p>
+                    <p className="mt-1 text-[13px] text-[#777]">Cards appear here once they are issued to your profile.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Card selection */}
+                    <div>
+                      <label htmlFor="link-card-select" className="block text-[13px] font-semibold text-[#121212]">
+                        Select a card
+                      </label>
+                      <select
+                        id="link-card-select"
+                        value={linkCardSelectedId}
+                        onChange={(e) => setLinkCardSelectedId(e.target.value)}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                      >
+                        {profile.cards.map((card) => (
+                          <option key={card.id} value={card.id}>
+                            {card.label} · ending ${card.last4} {card.linkedAccountId ? ` (linked to ${profile.accounts.find((a) => a.id === card.linkedAccountId)?.name ?? card.linkedAccountId})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Account selection */}
+                    <div>
+                      <label htmlFor="link-acct-select" className="block text-[13px] font-semibold text-[#121212]">
+                        Select an account to link
+                      </label>
+                      <select
+                        id="link-acct-select"
+                        value={linkCardAccountId}
+                        onChange={(e) => setLinkCardAccountId(e.target.value)}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                      >
+                        <option value="">— Select account —</option>
+                        {profile.accounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name} ({formatMoney(account.balance, account.currency)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Link button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const card = profile.cards.find((c) => c.id === linkCardSelectedId) ?? profile.cards[0];
+                        if (linkCardAccountId) {
+                          linkCardToAccount(card.id, linkCardAccountId);
+                          setLinkCardSelectedId("");
+                          setLinkCardAccountId("");
+                          notify(`Card linked to account.`);
+                        } else {
+                          notify("Please select an account to link.");
+                        }
+                      }}
+                      disabled={!linkCardAccountId}
+                      className="nbc-btn nbc-btn-primary disabled:opacity-50 w-full"
+                    >
+                      Link card to account
+                    </button>
+
+                    {/* Confirmation message */}
+                    {linkCardAccountId && profile.cards.find((c) => c.id === linkCardSelectedId)?.linkedAccountId === linkCardAccountId && (
+                      <div className="rounded-[6px] border border-[#017a33] bg-[#f0f9f0] p-4 text-center">
+                        <p className="text-[14px] font-semibold text-[#017a33]">Card is already linked to this account</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {moveMode === "card" && (
               <form onSubmit={handleCardTransfer} className="max-w-[720px] space-y-5 rounded-[6px] border border-[#e5e2da] bg-white p-6">
