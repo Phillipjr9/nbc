@@ -9,9 +9,9 @@ export function routeToHash(route: PageRoute): string {
     case "signup":
       return route.segment === "business" ? "#/signup/business" : "#/signup";
     case "personal-dashboard":
-      return "#/personal-banking";
+      return "#/dashboard";
     case "business-dashboard":
-      return "#/business-banking";
+      return "#/dashboard/business";
     case "admin-login":
       return "#/admin-login";
     case "admin":
@@ -28,6 +28,8 @@ export function routeToHash(route: PageRoute): string {
 export function hashToRoute(hash: string): PageRoute {
   const clean = hash.replace(/^#\/?/, "").trim().toLowerCase();
   if (!clean) return { kind: "home" };
+  if (clean === "dashboard" || clean === "dashboard/personal") return { kind: "personal-dashboard" };
+  if (clean === "dashboard/business") return { kind: "business-dashboard" };
   if (clean === "personal-banking") return { kind: "personal-dashboard" };
   if (clean === "business-banking") return { kind: "business-dashboard" };
   if (clean === "admin-login") return { kind: "admin-login" };
