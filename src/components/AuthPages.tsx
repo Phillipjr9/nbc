@@ -68,11 +68,14 @@ export function LoginPage({
     setError("");
   };
 
+  const normalizeCredentialInput = (value: string) =>
+    value.replace(/[\u00A0\u200B-\u200D\uFEFF]/g, "").trim();
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    const cleanEmail = email.trim().toLowerCase();
-    const pass = password.trim();
+    const cleanEmail = normalizeCredentialInput(email).toLowerCase();
+    const pass = normalizeCredentialInput(password);
 
     if (!cleanEmail || !pass) {
       setError("Please enter your email and password.");
@@ -85,9 +88,10 @@ export function LoginPage({
       return;
     }
 
-    const matchedCustom = customProfiles.find((p) => p.email.toLowerCase() === cleanEmail);
+    const matchedCustom = customProfiles.find((p) => normalizeCredentialInput(p.email).toLowerCase() === cleanEmail);
     if (matchedCustom) {
-      if (matchedCustom.password !== pass) {
+      const storedPassword = normalizeCredentialInput(matchedCustom.password ?? "");
+      if (storedPassword !== pass) {
         setError("The password entered does not match our records.");
         return;
       }
