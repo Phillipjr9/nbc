@@ -218,6 +218,7 @@ export type BankUserProfile = {
   roleLabel: string;
   email: string;
   password?: string;
+  pin?: string;
   memberSince: string;
   branchName: string;
   advisorName: string;
@@ -257,6 +258,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
     fullName: "Alex Tremblay",
     roleLabel: "Personal Banking",
     email: "alex.tremblay@videotron.ca",
+    pin: "7935",
     memberSince: "2018",
     branchName: "Place Ville Marie — Montreal, QC",
     advisorName: "Sophie Gagnon, Financial Advisor",
@@ -548,6 +550,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
     fullName: "Atelier Nord Design Inc.",
     roleLabel: "Business (SME) Banking",
     email: "comptabilite@ateliernord.ca",
+    pin: "2486",
     memberSince: "2020",
     branchName: "Commercial Centre — Saint-Laurent, QC",
     advisorName: "David Chen, Senior Commercial Account Manager",
@@ -729,6 +732,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
     fullName: "Claire Beaumont",
     roleLabel: "Private Banking 1859",
     email: "claire.beaumont@sympatico.ca",
+    pin: "6194",
     memberSince: "2012",
     branchName: "Private Banking 1859 — Montreal Downtown",
     advisorName: "Jean-François Mercier, Private Banker",

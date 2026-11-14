@@ -241,14 +241,20 @@ export default function Header({
               {/* Sign In / Online Bank button */}
               <li className="relative ml-1.5" ref={signInRef}>
                 {signedInName ? (
-                  <button
-                    type="button"
-                    onClick={() => go(dashboardRoute)}
-                    className="flex h-9 items-center gap-2 rounded-full border border-white bg-nbc-red px-3.5 text-[13.5px] font-semibold text-white transition hover:bg-nbc-red-dark sm:px-4"
-                  >
-                    <LockIcon className="h-3.5 w-3.5" />
-                    Online Bank
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <div className="hidden items-center gap-2 rounded-full border border-white/70 bg-white/10 px-2.5 py-1 text-[11px] font-semibold tracking-[0.08em] text-white/90 sm:flex">
+                      <span className="uppercase">Authenticated</span>
+                      <span className="text-white">{signedInName}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => go(dashboardRoute)}
+                      className="flex h-9 items-center gap-2 rounded-full border border-white bg-nbc-red px-3.5 text-[13.5px] font-semibold text-white transition hover:bg-nbc-red-dark sm:px-4"
+                    >
+                      <LockIcon className="h-3.5 w-3.5" />
+                      Online Bank
+                    </button>
+                  </div>
                 ) : (
                   <>
                     <button

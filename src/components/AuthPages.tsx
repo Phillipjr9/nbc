@@ -33,7 +33,14 @@ export function LoginPage({
 }: LoginPageProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [pin, setPin] = useState("");
   const [showPwd, setShowPwd] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+  const [isPinChecking, setIsPinChecking] = useState(false);
+  const [step, setStep] = useState<"credentials" | "pin">("credentials");
+  const [pendingProfile, setPendingProfile] = useState<BankUserProfile | null>(null);
+  const [pendingPersona, setPendingPersona] = useState<"personal" | "business" | "wealth" | null>(null);
+  const normalizePin = (value: string) => value.replace(/\D/g, "").slice(0, 4);
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState("");
   const [resetMode, setResetMode] = useState(false);
@@ -44,72 +51,126 @@ export function LoginPage({
   useEffect(() => {
     setEmail("");
     setPassword("");
+    setPin("");
+    setStep("credentials");
+    setPendingProfile(null);
+    setPendingPersona(null);
     setError("");
   }, [portal]);
 
+  const clearPinConfirmation = () => {
+    setPin("");
+    setShowPin(false);
+    setIsPinChecking(false);
+    setStep("credentials");
+    setPendingProfile(null);
+    setPendingPersona(null);
+    setError("");
+  };
 
-  /**
-   * Single universal sign-in.
-   * The credential itself determines the destination:
-   *   administrator account  → back-office console
-   *   registered client      → personal or business dashboard (by segment)
-   *   built-in sample client → matching dashboard
-   */
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     const cleanEmail = email.trim().toLowerCase();
     const pass = password.trim();
+
     if (!cleanEmail || !pass) {
       setError("Please enter your email and password.");
       return;
     }
 
-    // 1) Administrator credentials
     const admin = authenticateAdmin(cleanEmail, pass);
     if (admin.ok) {
       onSignInAdmin(admin.identity);
       return;
     }
 
-    // 2) Client profiles created through sign-up or the back office
     const matchedCustom = customProfiles.find((p) => p.email.toLowerCase() === cleanEmail);
     if (matchedCustom) {
-      if (matchedCustom.password && matchedCustom.password !== pass) {
-        setError("The password entered does not match our records. Use 'Forgot password?' below to reset it.");
+      if (matchedCustom.password !== pass) {
+        setError("The password entered does not match our records.");
         return;
       }
-      onSignInCustom(matchedCustom);
+      setPendingProfile(matchedCustom);
+      setStep("pin");
       return;
     }
 
-    // 3) Built-in profiles
-    const builtIns: { persona: "personal" | "business" | "wealth"; password: string }[] = [
-      { persona: "personal", password: "National2025!" },
-      { persona: "business", password: "Business2025!" },
-      { persona: "wealth", password: "Wealth2025!" },
+    const builtIns: { persona: "personal" | "business" | "wealth"; password: string; pin: string }[] = [
+      { persona: "personal", password: "National2025!", pin: "7935" },
+      { persona: "business", password: "Business2025!", pin: "2486" },
+      { persona: "wealth", password: "Wealth2025!", pin: "6194" },
     ];
-    const builtIn = builtIns.find(
-      (b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === cleanEmail
-    );
+    const builtIn = builtIns.find((b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === cleanEmail);
     if (builtIn) {
       if (builtIn.password !== pass) {
         setError("The password entered does not match our records.");
         return;
       }
-      onSelectPersona(builtIn.persona);
+      setPendingPersona(builtIn.persona);
+      setStep("pin");
       return;
     }
 
-    // 4) Administrators who only mistyped their passcode get a clearer message
     if (!admin.ok && /no administrator account/i.test(admin.error) === false) {
       setError(admin.error);
       return;
     }
 
-    setError(
-      "We could not find an account with those credentials. Check your email and password, or become a client online."
-    );
+    setError("We could not find an account with those credentials. Check your email and password.");
+  };
+
+  const handlePinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    const pinValue = normalizePin(pin);
+
+    if (pinValue.length !== 4) {
+      setError("Please enter your 4-digit security PIN.");
+      return;
+    }
+
+    const proceedWithPin = () => {
+      if (pendingProfile) {
+        const expectedPin = pendingProfile.pin?.trim() ||
+          (pendingProfile.email.toLowerCase() === "catherine.white@swiftdevice.ca" ? "1988" : "");
+        if (!expectedPin) {
+          setError("This account does not have a saved security PIN configured.");
+          setIsPinChecking(false);
+          return;
+        }
+        if (pinValue !== expectedPin) {
+          setError("Your security PIN is incorrect.");
+          setIsPinChecking(false);
+          return;
+        }
+        onSignInCustom({ ...pendingProfile, pin: expectedPin });
+        clearPinConfirmation();
+        return;
+      }
+
+      if (pendingPersona) {
+        const expectedPin = {
+          personal: "7935",
+          business: "2486",
+          wealth: "6194",
+        }[pendingPersona];
+        if (pinValue !== expectedPin) {
+          setError("Your security PIN is incorrect.");
+          setIsPinChecking(false);
+          return;
+        }
+        onSelectPersona(pendingPersona);
+        clearPinConfirmation();
+        return;
+      }
+
+      setError("Your account could not be verified. Please try again.");
+      setIsPinChecking(false);
+    };
+
+    setIsPinChecking(true);
+    window.setTimeout(proceedWithPin, 900);
   };
 
   const handlePasswordReset = (e: React.FormEvent) => {
@@ -134,8 +195,7 @@ export function LoginPage({
         {/* Universal sign-in — the credential decides where you land */}
         <div className="mb-6 rounded-[6px] border border-[#e5e2da] bg-white px-4 py-3 text-[13px] leading-[19px] text-[#565656]">
           <strong className="font-semibold text-nbc-navy">One sign-in for every client.</strong> Enter your email and
-          password — we take you to the right place automatically: personal banking, business cash management, wealth
-          management, or the administration console for National Bank employees.
+          password to authenticate the account, then confirm the saved security PIN to complete the session.
         </div>
 
         <div className="grid gap-8 lg:grid-cols-12">
@@ -147,7 +207,7 @@ export function LoginPage({
               Sign in to your account
             </h1>
             <p className="mt-1.5 text-[14.5px] leading-[22px] text-[#565656]">
-              Use the email address and password associated with your account. Your dashboard opens automatically.
+              Use your account email and password to authenticate the profile. Your security PIN is verified after that in a separate confirmation step.
             </p>
 
             {!resetMode ? (
@@ -186,7 +246,8 @@ export function LoginPage({
                     type={showPwd ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    autoComplete="off"
+                    autoComplete="current-password"
+                    placeholder="Your account password"
                     required
                     className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3.5 py-2.5 text-[15px] text-[#121212] focus:border-nbc-navy"
                   />
@@ -220,13 +281,133 @@ export function LoginPage({
                   </div>
                 )}
 
+                {step === "pin" && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b0d10]/55 p-4 backdrop-blur-[1px]">
+                    <div className="relative w-full max-w-[22rem] overflow-hidden rounded-[18px] border border-[#d7d0c5] bg-[#f9f7f3] shadow-[0_18px_45px_rgba(11,14,18,0.22)]">
+                      <div className="h-1.5 w-full bg-[linear-gradient(90deg,#c51d23_0%,#d5343b_25%,#123b6d_100%)]" />
+
+                      <div className="p-4 sm:p-5">
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#6f6a61]">
+                              Secure confirmation
+                            </p>
+                            <h2 className="mt-1 text-[20px] font-bold text-nbc-navy sm:text-[22px]">Confirm your security PIN</h2>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={clearPinConfirmation}
+                            className="text-[12px] font-medium text-[#1572C5] underline decoration-1 underline-offset-2 hover:no-underline"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+
+                        <p className="mb-4 text-[13px] leading-[20px] text-[#565656] sm:text-[14px] sm:leading-[22px]">
+                          Your account has been authenticated with your email and password. Please confirm the stored security PIN to continue.
+                        </p>
+
+                        <div className="space-y-4">
+                          {isPinChecking ? (
+                            <div className="flex flex-col items-center justify-center gap-3 py-6 text-center">
+                              <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-[#dfe8f2] border-t-[#103c6d]" />
+                              <div>
+                                <p className="text-[14px] font-semibold text-[#0b1a2b]">Verifying secure PIN</p>
+                                <p className="mt-1 text-[12.5px] text-[#5d6773]">Authenticating your profile…</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div>
+                                <label htmlFor="login-pin" className="mb-1.5 block text-[13.5px] font-semibold text-[#121212]">
+                                  Security PIN
+                                </label>
+                                <div className="flex min-h-[62px] w-full items-center justify-center rounded-[12px] border border-[#cfc7bc] bg-white px-3 py-2.5 shadow-[inset_0_1px_0_rgba(17,22,29,0.04)]">
+                                  <input
+                                    id="login-pin"
+                                    type={showPin ? "text" : "password"}
+                                    value={pin}
+                                    onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                                    autoComplete="off"
+                                    inputMode="numeric"
+                                    maxLength={4}
+                                    aria-label="Security PIN"
+                                    className="sr-only"
+                                  />
+                                  <div className="flex items-center justify-center gap-2.5">
+                                    {Array.from({ length: 4 }).map((_, index) => {
+                                      const value = index < pin.length ? pin[index] : "";
+                                      return (
+                                        <div
+                                          key={index}
+                                          className={`flex h-3.5 w-3.5 items-center justify-center rounded-full border text-[10px] font-bold text-[#0e2036] ${
+                                            value ? (showPin ? "border-[#0e2036] bg-[#eef4fa]" : "border-[#0e2036] bg-[#0e2036]") : "border-[#b9b1a8] bg-transparent"
+                                          }`}
+                                        >
+                                          {showPin && value ? value : ""}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="mx-auto grid max-w-[260px] grid-cols-3 gap-2.5 sm:max-w-[290px]">
+                                {["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "⌫"].map((key) => (
+                                  <button
+                                    key={key}
+                                    type="button"
+                                    disabled={isPinChecking}
+                                    onClick={() => {
+                                      if (key === "C") {
+                                        setPin("");
+                                        return;
+                                      }
+                                      if (key === "⌫") {
+                                        setPin((current) => current.slice(0, -1));
+                                        return;
+                                      }
+                                      setPin((current) => (current.length >= 4 ? current : `${current}${key}`));
+                                    }}
+                                    className="flex h-11 items-center justify-center rounded-[10px] border border-[#d7d1c8] bg-[#f5f2ee] text-[18px] font-semibold text-nbc-navy shadow-[0_1px_0_rgba(0,0,0,0.03)] transition hover:bg-[#efeae2] active:translate-y-[1px] disabled:cursor-not-allowed disabled:opacity-60 sm:h-12 sm:text-[20px]"
+                                  >
+                                    {key}
+                                  </button>
+                                ))}
+                              </div>
+
+                              <div className="flex items-center justify-between gap-3 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowPin((v) => !v)}
+                                  className="text-[13px] font-medium text-[#1572C5] underline decoration-1 underline-offset-2 hover:no-underline"
+                                >
+                                  {showPin ? "Hide" : "Show"}
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handlePinSubmit({ preventDefault: () => undefined } as React.FormEvent)}
+                                  className="nbc-btn nbc-btn-primary px-5 py-2.5"
+                                >
+                                  Continue
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="pt-2">
                   <button type="submit" className="nbc-btn nbc-btn-primary w-full justify-center py-3.5">
                     <LockIcon className="h-4 w-4" />
                     Sign in
                   </button>
                   <p className="mt-2 text-center text-[11.5px] leading-[16px] text-[#777]">
-                    Clients open their personal or business dashboard. Employees open the administration console.
+                    Your email and password authenticate the account. The saved security PIN is verified in a separate confirmation step.
                   </p>
                 </div>
               </form>
@@ -518,6 +699,8 @@ export function SignupPage({ initialSegment = "personal", onNavigate, onCreatePr
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPwd, setConfirmPwd] = useState("");
+  const [pin, setPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
   const [branchCity, setBranchCity] = useState("Place Ville Marie — Montreal, QC");
 
   const [initialDeposit, setInitialDeposit] = useState(6000);
@@ -551,6 +734,14 @@ export function SignupPage({ initialSegment = "personal", onNavigate, onCreatePr
       }
       if (password !== confirmPwd) {
         setFormError("Passwords do not match.");
+        return;
+      }
+      if (!/^\d{4}$/.test(pin)) {
+        setFormError("Please create a 4-digit security PIN.");
+        return;
+      }
+      if (pin !== confirmPin) {
+        setFormError("Security PINs do not match.");
         return;
       }
       setStep(3);
@@ -627,6 +818,7 @@ export function SignupPage({ initialSegment = "personal", onNavigate, onCreatePr
       businessNumber: isBiz ? `BN ${suffix}-4102 RC0001` : undefined,
       email: email.trim(),
       password,
+      pin,
       memberSince: "2026",
       branchName: branchCity,
       advisorName: isBiz ? "David Chen, Senior Commercial Advisor" : "Sophie Gagnon, Financial Advisor",
@@ -842,6 +1034,39 @@ export function SignupPage({ initialSegment = "personal", onNavigate, onCreatePr
                       value={confirmPwd}
                       onChange={(e) => setConfirmPwd(e.target.value)}
                       placeholder="Re-enter password"
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3.5 py-2.5 text-[14.5px] text-[#121212]"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="su-pin" className="block text-[13.5px] font-semibold text-[#121212]">
+                      Security PIN
+                    </label>
+                    <input
+                      id="su-pin"
+                      type="password"
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      placeholder="4 digits"
+                      inputMode="numeric"
+                      maxLength={4}
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3.5 py-2.5 text-[14.5px] text-[#121212]"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="su-cpin" className="block text-[13.5px] font-semibold text-[#121212]">
+                      Confirm PIN
+                    </label>
+                    <input
+                      id="su-cpin"
+                      type="password"
+                      value={confirmPin}
+                      onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                      placeholder="Repeat PIN"
+                      inputMode="numeric"
+                      maxLength={4}
                       className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3.5 py-2.5 text-[14.5px] text-[#121212]"
                     />
                   </div>

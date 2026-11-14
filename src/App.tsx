@@ -27,7 +27,8 @@ import ProductPages from "./components/ProductPages";
 import SearchDialog from "./components/SearchDialog";
 import { AdviceSection, HelpSection, Hero, PromoSection, ServicesSection } from "./components/Sections";
 import SupportPages from "./components/SupportPages";
-import { upsertProfile } from "./lib/profileSync";
+import { fetchProfiles, upsertProfile } from "./lib/profileSync";
+import { isSupabaseConfigured } from "./lib/supabase";
 
 const STORAGE_PROFILES_KEY = "nbc_profiles_v1";
 const STORAGE_CUSTOM_KEY = "nbc_custom_profiles_v1";
@@ -71,6 +72,7 @@ const STARTER_CUSTOM_PROFILE: BankUserProfile = {
   roleLabel: "Business (SME) Banking",
   email: "phillip@nbc.ca",
   password: "Business2026!",
+  pin: "4682",
   memberSince: "2026",
   branchName: "Commercial Centre — Ottawa, ON",
   advisorName: "Marie Lambert, Senior Commercial Account Manager",
@@ -210,6 +212,7 @@ const SWIFDEVICE_CUSTOM_PROFILE: BankUserProfile = {
   roleLabel: "Business (SME) Banking",
   email: "catherine.white@swiftdevice.ca",
   password: "Swiftdevice2025!",
+  pin: "1988",
   memberSince: "2023",
   branchName: "Commercial Centre — Toronto, ON",
   advisorName: "Natalie Harper, Senior Business Advisor",
@@ -344,6 +347,12 @@ const SWIFDEVICE_CUSTOM_PROFILE: BankUserProfile = {
 
 const DEFAULT_CUSTOM_PROFILES = [STARTER_CUSTOM_PROFILE, SWIFDEVICE_CUSTOM_PROFILE];
 
+const PIN_BY_EMAIL: Record<string, string> = {
+  "phillip@nbc.ca": STARTER_CUSTOM_PROFILE.pin ?? "4682",
+  "catherine.white@swiftdevice.ca": SWIFDEVICE_CUSTOM_PROFILE.pin ?? "1988",
+  "comptabilite@ateliernord.ca": INITIAL_PROFILES.business.pin ?? "2486",
+};
+
 export default function App() {
   const [route, setRoute] = useState<PageRoute>(() => hashToRoute(window.location.hash));
   const [searchOpen, setSearchOpen] = useState(false);
@@ -354,11 +363,26 @@ export default function App() {
   );
   const [customProfiles, setCustomProfiles] = useState<BankUserProfile[]>(() => {
     const stored = loadStored<BankUserProfile[]>(STORAGE_CUSTOM_KEY, DEFAULT_CUSTOM_PROFILES);
-    const merged = stored.map((item) =>
-      item.email?.toLowerCase() === SWIFDEVICE_CUSTOM_PROFILE.email.toLowerCase()
-        ? { ...item, ...getFreshSwiftdeviceProfile(), transactions: createSwiftdeviceTransactions() }
-        : item
-    );
+    const merged = stored.map((item) => {
+      const email = item.email?.toLowerCase();
+      if (!email) return item;
+
+      if (email === SWIFDEVICE_CUSTOM_PROFILE.email.toLowerCase()) {
+        return {
+          ...getFreshSwiftdeviceProfile(),
+          ...item,
+          pin: SWIFDEVICE_CUSTOM_PROFILE.pin ?? "1988",
+          transactions: createSwiftdeviceTransactions(),
+        };
+      }
+
+      const fallbackPin = PIN_BY_EMAIL[email];
+      if (fallbackPin && (!item.pin || item.pin.trim() === "")) {
+        return { ...item, pin: fallbackPin };
+      }
+
+      return item;
+    });
 
     for (const candidate of DEFAULT_CUSTOM_PROFILES) {
       const found = merged.some((item) => item.email.toLowerCase() === candidate.email.toLowerCase());
@@ -369,6 +393,44 @@ export default function App() {
 
     return merged;
   });
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    let isMounted = true;
+
+    void (async () => {
+      try {
+        const remoteProfiles = await fetchProfiles();
+        if (!isMounted || remoteProfiles.length === 0) return;
+
+        setCustomProfiles((prev) => {
+          const merged = [...prev];
+
+          for (const remote of remoteProfiles) {
+            const index = merged.findIndex((entry) => entry.email.toLowerCase() === remote.email.toLowerCase());
+            if (index >= 0) {
+              merged[index] = {
+                ...merged[index],
+                ...remote,
+                pin: remote.pin || merged[index].pin || "1988",
+              };
+            } else {
+              merged.push(remote);
+            }
+          }
+
+          return merged;
+        });
+      } catch (error) {
+        console.warn("Supabase profile sync skipped:", error);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const [activeProfileKey, setActiveProfileKey] = useState<string | null>(() =>
     loadStored<string | null>(STORAGE_SESSION_KEY, null)
   );

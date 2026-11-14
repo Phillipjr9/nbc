@@ -2779,6 +2779,64 @@ export default function Dashboard({
                   Update password
                 </button>
               </form>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget as HTMLFormElement;
+                  const current = String(new FormData(form).get("currentPin") ?? "");
+                  const next = String(new FormData(form).get("nextPin") ?? "");
+                  const confirm = String(new FormData(form).get("confirmPin") ?? "");
+                  const normalizedCurrent = current.replace(/\D/g, "");
+                  const normalizedNext = next.replace(/\D/g, "");
+                  const normalizedConfirm = confirm.replace(/\D/g, "");
+
+                  if (profile.pin && normalizedCurrent !== profile.pin) {
+                    notify("Your current security PIN is incorrect.");
+                    return;
+                  }
+                  if (!/^\d{4}$/.test(normalizedNext)) {
+                    notify("Choose a 4-digit PIN.");
+                    return;
+                  }
+                  if (normalizedNext !== normalizedConfirm) {
+                    notify("The new PINs do not match.");
+                    return;
+                  }
+                  onUpdateProfile((prev) => ({ ...prev, pin: normalizedNext }));
+                  notify("Your security PIN has been updated.");
+                  form.reset();
+                }}
+                className="space-y-4 rounded-[6px] border border-[#e5e2da] bg-white p-6"
+              >
+                <h2 className="text-[19px] font-bold text-nbc-navy">Change your security PIN</h2>
+                <p className="text-[13px] text-[#565656]">
+                  Use a 4-digit PIN that is easy for you to remember and different from your password.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  {[
+                    { name: "currentPin", label: "Current PIN", ph: "1234" },
+                    { name: "nextPin", label: "New PIN", ph: "4 digits" },
+                    { name: "confirmPin", label: "Confirm new PIN", ph: "Repeat PIN" },
+                  ].map((f) => (
+                    <label key={f.name} className="block">
+                      <span className="mb-1 block text-[12.5px] font-semibold text-[#121212]">{f.label}</span>
+                      <input
+                        name={f.name}
+                        type="password"
+                        inputMode="numeric"
+                        maxLength={4}
+                        placeholder={f.ph}
+                        autoComplete="one-time-code"
+                        className="w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2 text-[14px] text-[#121212]"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <button type="submit" className="nbc-btn nbc-btn-ghost">
+                  Update PIN
+                </button>
+              </form>
             </div>
 
             <div className="space-y-5 lg:col-span-5">
