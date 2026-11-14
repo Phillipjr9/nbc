@@ -29,7 +29,7 @@ import ProductPages from "./components/ProductPages";
 import SearchDialog from "./components/SearchDialog";
 import { AdviceSection, HelpSection, Hero, PromoSection, ServicesSection } from "./components/Sections";
 import SupportPages from "./components/SupportPages";
-import { fetchProfiles, upsertProfile, seedCatherineWhiteProfile, CATHERINE_WHITE_PROFILE } from "./lib/profileSync";
+import { fetchProfiles, upsertProfile } from "./lib/profileSync";
 import { isSupabaseConfigured } from "./lib/supabase";
 
 const STORAGE_PROFILES_KEY = "nbc_profiles_v1";
@@ -144,15 +144,7 @@ export default function App() {
   });
   const [customProfiles, setCustomProfiles] = useState<BankUserProfile[]>(() => {
     const stored = loadStored<BankUserProfile[]>(STORAGE_CUSTOM_KEY, []);
-    const existing = sanitizeCustomProfiles(Array.isArray(stored) ? stored : []);
-    // Include Catherine White if not already present
-    const hasCatherine = existing.some(
-      (p) => p.email.toLowerCase() === CATHERINE_WHITE_PROFILE.email.toLowerCase()
-    );
-    if (!hasCatherine) {
-      return [...existing, CATHERINE_WHITE_PROFILE];
-    }
-    return existing;
+    return sanitizeCustomProfiles(Array.isArray(stored) ? stored : []);
   });
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -170,9 +162,6 @@ export default function App() {
         console.warn("Supabase profile sync skipped:", error);
       }
     };
-
-    // Seed Catherine White's profile to Supabase with complete data
-    void seedCatherineWhiteProfile();
 
     void refreshProfiles();
     intervalId = window.setInterval(() => {
