@@ -215,50 +215,308 @@ export default function BusinessDashboard({
             .filter((tx) => tx.accountId === accountId)
             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-    const title = subjectAccount ? `${subjectAccount.name} account statement` : "Commercial account statement";
-    const accountLabel = subjectAccount ? `${subjectAccount.name} · ${subjectAccount.number}` : "All corporate accounts";
-    const rowsHtml = rows
-      .map(
-        (tx) => {
-          const acc = profile.accounts.find((a) => a.id === tx.accountId);
-          const dr = tx.amount < 0 ? txDisplayAmount(tx.amount, acc?.currency ?? "CAD") : "—";
-          const cr = tx.amount >= 0 ? txDisplayAmount(tx.amount, acc?.currency ?? "CAD") : "—";
-          return `
-            <tr>
-              <td>${tx.date}</td>
-              <td>${tx.description}</td>
-              <td>${acc?.name ?? tx.accountId}</td>
-              <td>${dr}</td>
-              <td>${cr}</td>
-            </tr>
-          `;
-        }
-      )
+    const statementDate = new Date();
+    const statementPeriodLabel = new Intl.DateTimeFormat("en-CA", { month: "long", year: "numeric" }).format(statementDate);
+    const summaryBalance = subjectAccount ? subjectAccount.balance : rows.reduce((sum, tx) => sum + tx.amount, 0);
+    const accountLabel = subjectAccount ? `${subjectAccount.name} · ${subjectAccount.number}` : "All active corporate accounts";
+    const rowsPerPage = 12;
+    const statementPages: Transaction[][] = [];
+
+    for (let index = 0; index < rows.length; index += rowsPerPage) {
+      statementPages.push(rows.slice(index, index + rowsPerPage));
+    }
+
+    if (statementPages.length === 0) {
+      statementPages.push([]);
+    }
+
+    const pageMarkup = statementPages
+      .map((pageRows, pageIndex) => {
+        const pageTransactions = pageRows.length
+          ? pageRows
+              .map((tx) => {
+                const acc = profile.accounts.find((a) => a.id === tx.accountId);
+                const dr = tx.amount < 0 ? formatMoney(Math.abs(tx.amount), acc?.currency ?? "CAD") : "—";
+                const cr = tx.amount >= 0 ? formatMoney(Math.abs(tx.amount), acc?.currency ?? "CAD") : "—";
+                return `
+                  <tr>
+                    <td>${tx.date}</td>
+                    <td>${tx.description}</td>
+                    <td>${acc?.name ?? tx.accountId}</td>
+                    <td>${dr}</td>
+                    <td>${cr}</td>
+                  </tr>
+                `;
+              })
+              .join("")
+          : '<tr><td colspan="5">No transactions available for this statement period.</td></tr>';
+
+        const totalDebits = pageRows.reduce((sum, tx) => (tx.amount < 0 ? sum + Math.abs(tx.amount) : sum), 0);
+        const totalCredits = pageRows.reduce((sum, tx) => (tx.amount >= 0 ? sum + Math.abs(tx.amount) : sum), 0);
+
+        return `
+          <section class="statement-page">
+            <header class="statement-header">
+              <div class="brand-wrap">
+                <img src="${logoNbc}" alt="National Bank" class="brand-logo" />
+                <div class="brand-mark-wrap">
+                  <img src="${logoBnMark}" alt="National Bank mark" class="brand-mark" />
+                </div>
+              </div>
+              <div class="header-meta">
+                <span class="eyebrow">Business banking</span>
+                <strong>Account statement</strong>
+              </div>
+            </header>
+
+            <div class="client-box">
+              <div>
+                <div class="eyebrow">Client</div>
+                <div class="client-name">${profile.fullName}</div>
+                <div class="client-sub">${profile.email}</div>
+              </div>
+              <div>
+                <div class="eyebrow">Branch</div>
+                <div class="client-sub">${profile.branchName}</div>
+              </div>
+              <div>
+                <div class="eyebrow">Advisor</div>
+                <div class="client-sub">${profile.advisorName}</div>
+              </div>
+            </div>
+
+            <div class="summary-grid">
+              <div class="summary-card">
+                <span class="eyebrow">Account</span>
+                <strong>${subjectAccount ? subjectAccount.name : "Commercial portfolio"}</strong>
+                <small>${accountLabel}</small>
+              </div>
+              <div class="summary-card">
+                <span class="eyebrow">Statement period</span>
+                <strong>${statementPeriodLabel}</strong>
+                <small>Prepared ${new Date().toLocaleDateString("en-CA")}</small>
+              </div>
+              <div class="summary-card highlight">
+                <span class="eyebrow">Closing balance</span>
+                <strong>${formatMoney(Math.abs(summaryBalance), subjectAccount?.currency ?? "CAD")}</strong>
+                <small>${subjectAccount?.currency ?? "CAD"} • ${subjectAccount ? "Available" : "Portfolio"}</small>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Account</th>
+                    <th>Debit</th>
+                    <th>Credit</th>
+                  </tr>
+                </thead>
+                <tbody>${pageTransactions}</tbody>
+              </table>
+            </div>
+
+            <div class="totals-row">
+              <span>Page ${pageIndex + 1} of ${statementPages.length}</span>
+              <span>Debits: ${formatMoney(totalDebits, subjectAccount?.currency ?? "CAD")}</span>
+              <span>Credits: ${formatMoney(totalCredits, subjectAccount?.currency ?? "CAD")}</span>
+            </div>
+
+            <footer class="statement-footer">
+              <span>National Bank of Canada</span>
+              <span>Secure banking • Confidential statement</span>
+            </footer>
+          </section>
+        `;
+      })
       .join("");
 
-    const win = window.open("", "_blank", "width=1000,height=1200");
+    const win = window.open("", "_blank", "width=1200,height=1400");
     if (!win) return;
 
-    win.document.write(`<!doctype html><html><head><title>${title}</title><style>
-      body { font-family: Arial, sans-serif; background: #fff; color: #121212; padding: 32px; }
-      h1 { font-size: 28px; margin: 0 0 12px; }
-      .meta { color: #565656; font-size: 13px; margin-bottom: 20px; }
-      table { width: 100%; border-collapse: collapse; margin-top: 18px; }
-      th, td { border-bottom: 1px solid #e7e7e7; padding: 10px 8px; text-align: left; font-size: 12px; }
-      th { background: #faf8f3; color: #565656; text-transform: uppercase; letter-spacing: .08em; }
-      .amount { font-weight: 700; }
-      @media print { body { padding: 20px; } }
-    </style></head><body>
-      <h1>${title}</h1>
-      <div class="meta">${accountLabel}</div>
-      <div class="meta">Prepared: ${new Date().toLocaleDateString("en-CA")}</div>
-      <table>
-        <thead>
-          <tr><th>Date</th><th>Description</th><th>Account</th><th>Debit</th><th>Credit</th></tr>
-        </thead>
-        <tbody>${rowsHtml || '<tr><td colspan="5">No transactions available.</td></tr>'}</tbody>
-      </table>
-    </body></html>`);
+    win.document.write(`<!doctype html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <title>${subjectAccount ? `${subjectAccount.name} account statement` : "Commercial account statement"}</title>
+          <style>
+            @page { size: A4; margin: 12mm; }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              background: #f3f1ee;
+              color: #121212;
+              font-family: Arial, Helvetica, sans-serif;
+            }
+            .statement-page {
+              width: 210mm;
+              min-height: 297mm;
+              margin: 0 auto 12mm;
+              padding: 12mm 14mm 12mm;
+              background: #ffffff;
+              box-shadow: 0 1px 8px rgba(0,0,0,0.08);
+              page-break-after: always;
+            }
+            .statement-page:last-child { page-break-after: auto; margin-bottom: 0; }
+            .statement-header {
+              display: flex;
+              align-items: center;
+              justify-content: space-between;
+              gap: 12px;
+              border-bottom: 2px solid #ece7df;
+              padding-bottom: 12px;
+              margin-bottom: 18px;
+            }
+            .brand-wrap {
+              display: flex;
+              align-items: center;
+              gap: 12px;
+            }
+            .brand-logo {
+              width: 150px;
+              height: auto;
+            }
+            .brand-mark-wrap {
+              display: inline-flex;
+              width: 34px;
+              height: 34px;
+              border-radius: 50%;
+              background: #f6f3ee;
+              padding: 6px;
+              align-items: center;
+              justify-content: center;
+            }
+            .brand-mark {
+              width: 100%;
+              height: 100%;
+            }
+            .header-meta {
+              text-align: right;
+            }
+            .eyebrow {
+              display: block;
+              color: #6d6b66;
+              font-size: 10px;
+              letter-spacing: 0.12em;
+              text-transform: uppercase;
+              margin-bottom: 4px;
+            }
+            .header-meta strong {
+              display: block;
+              font-size: 18px;
+              color: #00314d;
+            }
+            .client-box {
+              display: grid;
+              grid-template-columns: repeat(3, minmax(0, 1fr));
+              gap: 12px;
+              padding: 14px 16px;
+              background: #faf8f3;
+              border: 1px solid #e9e1d5;
+              border-radius: 8px;
+              margin-bottom: 18px;
+            }
+            .client-name {
+              font-size: 16px;
+              font-weight: 700;
+              color: #00314d;
+              margin-bottom: 2px;
+            }
+            .client-sub {
+              color: #565656;
+              font-size: 12px;
+              line-height: 1.5;
+            }
+            .summary-grid {
+              display: grid;
+              grid-template-columns: repeat(3, minmax(0, 1fr));
+              gap: 12px;
+              margin-bottom: 18px;
+            }
+            .summary-card {
+              padding: 12px 14px;
+              border: 1px solid #ece7df;
+              border-radius: 8px;
+              background: #fff;
+            }
+            .summary-card strong {
+              display: block;
+              font-size: 18px;
+              color: #00314d;
+              margin-bottom: 4px;
+            }
+            .summary-card small {
+              display: block;
+              color: #565656;
+              font-size: 11px;
+            }
+            .summary-card.highlight {
+              background: #fff8f7;
+              border-color: #f0cdc9;
+            }
+            .table-wrap {
+              border: 1px solid #ece7df;
+              border-radius: 8px;
+              overflow: hidden;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              table-layout: fixed;
+            }
+            th, td {
+              text-align: left;
+              padding: 9px 8px;
+              border-bottom: 1px solid #eeeae2;
+              font-size: 11px;
+              vertical-align: top;
+            }
+            th {
+              background: #faf8f3;
+              color: #565656;
+              text-transform: uppercase;
+              letter-spacing: 0.08em;
+              font-weight: 700;
+            }
+            tbody tr:last-child td { border-bottom: none; }
+            .totals-row {
+              display: flex;
+              justify-content: space-between;
+              gap: 12px;
+              font-size: 11px;
+              color: #565656;
+              padding-top: 12px;
+              margin-top: 14px;
+              border-top: 1px solid #ece7df;
+            }
+            .statement-footer {
+              display: flex;
+              justify-content: space-between;
+              gap: 16px;
+              margin-top: 20px;
+              padding-top: 10px;
+              border-top: 1px solid #ece7df;
+              font-size: 10px;
+              color: #6d6b66;
+              text-transform: uppercase;
+              letter-spacing: 0.06em;
+            }
+            @media print {
+              body { background: #fff; }
+              .statement-page {
+                box-shadow: none;
+                margin: 0;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          ${pageMarkup}
+        </body>
+      </html>
+    `);
     win.document.close();
     setTimeout(() => win.print(), 250);
   };
