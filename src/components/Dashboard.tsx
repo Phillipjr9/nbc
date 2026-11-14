@@ -62,6 +62,18 @@ export default function Dashboard({
       return { ...next, notifications: [...alerts, ...(next.notifications ?? [])] };
     });
   };
+
+  const updateCardLink = (cardId: string, updates: Partial<Pick<BankCard, "cardholderName" | "expiry" | "billingAddress" | "linkedAccountId">>) => {
+    onUpdateProfile((prev) => ({
+      ...prev,
+      cards: prev.cards.map((card) => (card.id === cardId ? { ...card, ...updates } : card)),
+    }));
+  };
+
+  const linkCardToAccount = (cardId: string, accountId: string) => {
+    updateCardLink(cardId, { linkedAccountId: accountId });
+    notify("Card linked to account.");
+  };
   const [tab, setTab] = useState<DashboardTab>("summary");
 
   useEffect(() => {
@@ -122,6 +134,7 @@ export default function Dashboard({
   const [cardId, setCardId] = useState(profile.cards[0]?.id ?? "");
   const [cardAmt, setCardAmt] = useState("250.00");
   const [cardMemo, setCardMemo] = useState("");
+  const [linkedAccountId, setLinkedAccountId] = useState("");
 
   // Scheduled / recurring transfers
   const [schFromId, setSchFromId] = useState(sourceAccounts[0]?.id ?? "");
@@ -1945,21 +1958,35 @@ export default function Dashboard({
                     ))}
                   </select>
                   {profile.cards.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const card = profile.cards.find((c) => c.id === cardId) ?? profile.cards[0];
-                        const linked = card ? profile.accounts.find((a) => a.id === card.linkedAccountId) : undefined;
-                        if (!linked) {
-                          notify("Link a card to your profile first to transfer funds.");
-                          return;
-                        }
-                        notify(`${card.label} is linked to ${linked.name}.`);
-                      }}
-                      className="mt-2 w-full rounded-[6px] border border-nbc-navy bg-[#f8f6f1] py-2 text-[13px] font-semibold text-nbc-navy hover:bg-nbc-navy hover:text-white"
-                    >
-                      Link a card
-                    </button>
+                    <div className="mt-2 space-y-2">
+                      <select
+                        id="link-account-select"
+                        value={linkedAccountId}
+                        onChange={(e) => setLinkedAccountId(e.target.value)}
+                        className="w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                      >
+                        <option value="">— Select account to link —</option>
+                        {profile.accounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name} ({formatMoney(account.balance, account.currency)})
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const card = profile.cards.find((c) => c.id === cardId) ?? profile.cards[0];
+                          if (linkedAccountId) {
+                            linkCardToAccount(card.id, linkedAccountId);
+                          } else {
+                            notify("Please select an account to link.");
+                          }
+                        }}
+                        className="w-full rounded-[6px] border border-nbc-navy bg-nbc-navy py-2 text-[13px] font-semibold text-white hover:bg-[#003060]"
+                      >
+                        Link card to account
+                      </button>
+                    </div>
                   )}
                 </div>
 
