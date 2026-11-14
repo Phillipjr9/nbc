@@ -21,15 +21,28 @@
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    font-size: 16px;
     scroll-behavior: smooth;
   }
 
   body {
     font-family: var(--font-sans);
+    font-size: 15px;
     color: var(--color-nbc-ink);
     background: #ffffff;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+  }
+
+  @media (max-width: 640px) {
+    html {
+      font-size: 14px;
+    }
+
+    body {
+      font-size: 14px;
+    }
   }
 
   ::selection {
