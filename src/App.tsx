@@ -26,6 +26,7 @@ import ProductPages from "./components/ProductPages";
 import SearchDialog from "./components/SearchDialog";
 import { AdviceSection, HelpSection, Hero, PromoSection, ServicesSection } from "./components/Sections";
 import SupportPages from "./components/SupportPages";
+import { upsertProfile } from "./lib/profileSync";
 
 const STORAGE_PROFILES_KEY = "nbc_profiles_v1";
 const STORAGE_CUSTOM_KEY = "nbc_custom_profiles_v1";
@@ -202,6 +203,29 @@ export default function App() {
     }
     return customProfiles.find((c) => c.email.toLowerCase() === activeProfileKey.toLowerCase()) ?? null;
   }, [activeProfileKey, profiles, customProfiles]);
+
+  useEffect(() => {
+    if (!activeProfile) return;
+
+    let isMounted = true;
+
+    void (async () => {
+      try {
+        const result = await upsertProfile(activeProfile);
+        if (!isMounted) return;
+
+        if (result && "ok" in result && result.ok) {
+          console.info("Profile synced to Supabase", activeProfile.email);
+        }
+      } catch (error) {
+        console.warn("Profile sync skipped:", error);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [activeProfile]);
 
   const activeDashboardRoute: PageRoute = useMemo(() => {
     if (activeProfile && isBusinessProfile(activeProfile)) {
