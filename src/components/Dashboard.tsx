@@ -117,7 +117,11 @@ export default function Dashboard({
   const [depAmt, setDepAmt] = useState("420.00");
 
   // Card transfer / cash add
-
+  const [cardTxType, setCardTxType] = useState<"transfer" | "cash" | "from-card">("transfer");
+  const [cardSourceId, setCardSourceId] = useState(sourceAccounts[0]?.id ?? "");
+  const [cardId, setCardId] = useState(profile.cards[0]?.id ?? "");
+  const [cardAmt, setCardAmt] = useState("250.00");
+  const [cardMemo, setCardMemo] = useState("");
 
   // Scheduled / recurring transfers
   const [schFromId, setSchFromId] = useState(sourceAccounts[0]?.id ?? "");
@@ -488,6 +492,92 @@ export default function Dashboard({
     setNewPayeeName("");
     setNewPayeeRef("");
     notify(`Payee ${newPayeeName.trim()} added.`);
+  };
+
+  const handleCardTransfer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (transferLockActive) {
+      notify(
+        profile.status === "frozen"
+          ? "This account is on hold and cannot send transfers."
+          : "Outgoing transfers are paused for this account."
+      );
+      return;
+    }
+
+    const amt = Number(cardAmt);
+    const card = profile.cards.find((c) => c.id === cardId) ?? profile.cards[0];
+    const linked = card ? profile.accounts.find((a) => a.id === card.linkedAccountId) : undefined;
+    const targetAccount = profile.accounts.find((a) => a.id === cardSourceId) ?? sourceAccounts[0];
+
+    if (!card || !linked) {
+      notify("Link a card to your profile first to transfer funds.");
+      return;
+    }
+
+    if (!targetAccount) {
+      notify("Choose an account for this transfer.");
+      return;
+    }
+
+    if (!amt || amt <= 0) {
+      notify("Enter a valid amount to transfer.");
+      return;
+    }
+
+    const memoClean = cardMemo.trim();
+
+    const updatedSrcBalance = Math.round((targetAccount.balance - amt) * 100) / 100;
+    const updatedLinkedBalance = Math.round((linked.balance + amt) * 100) / 100;
+
+    runAnimatedTransaction(
+      {
+        kind: "transfer",
+        amount: amt,
+        currency: targetAccount.currency,
+        fromLabel: targetAccount.name,
+        toLabel: `${card.label} (${linked.name})`,
+        memo: memoClean || undefined,
+        reference: makeReference("CRD"),
+        timestamp: `${todayIso()} · ${nowStamp()}`,
+        updatedBalanceLabel: `${targetAccount.name}: ${formatMoney(updatedSrcBalance, targetAccount.currency)}`,
+      },
+      () => {
+        const outTxId = `card-out-${Date.now()}`;
+        const inTxId = `card-in-${Date.now()}`;
+        onUpdateProfile((prev) => ({
+          ...prev,
+          accounts: prev.accounts.map((account) => {
+            if (account.id === targetAccount.id) return { ...account, balance: updatedSrcBalance };
+            if (account.id === linked.id) return { ...account, balance: updatedLinkedBalance };
+            return account;
+          }),
+          transactions: [
+            {
+              id: outTxId,
+              accountId: targetAccount.id,
+              date: todayIso(),
+              description: `Transfer to ${card.label}${memoClean ? ` — ${memoClean}` : ""}`,
+              category: "Transfer",
+              amount: -amt,
+              status: "Posted",
+            },
+            {
+              id: inTxId,
+              accountId: linked.id,
+              date: todayIso(),
+              description: `Card funds added — ${card.label}${memoClean ? ` — ${memoClean}` : ""}`,
+              category: "Transfer",
+              amount: amt,
+              status: "Posted",
+            },
+            ...prev.transactions,
+          ],
+        }));
+        setCardMemo("");
+        return [outTxId, inTxId];
+      }
+    );
   };
 
   const handleChequeDeposit = (e: React.FormEvent) => {
@@ -1792,6 +1882,122 @@ export default function Dashboard({
                 </button>
               ))}
             </div>
+
+            {moveMode === "card" && (
+              <form onSubmit={handleCardTransfer} className="max-w-[720px] space-y-5 rounded-[6px] border border-[#e5e2da] bg-white p-6">
+                <div>
+                  <h2 className="text-[20px] font-bold text-nbc-navy">Transfer funds to a linked card</h2>
+                  <p className="mt-1 text-[14px] text-[#565656]">
+                    Add cash to a linked card or move money from your account to a card that is already linked to your profile.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="card-tx-type" className="block text-[13px] font-semibold text-[#121212]">
+                      Transaction type
+                    </label>
+                    <select
+                      id="card-tx-type"
+                      value={cardTxType}
+                      onChange={(e) => setCardTxType(e.target.value as "transfer" | "cash" | "from-card")}
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                    >
+                      <option value="transfer">Transfer to card</option>
+                      <option value="cash">Add cash to card</option>
+                      <option value="from-card">Add funds from card</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="card-source" className="block text-[13px] font-semibold text-[#121212]">
+                      Funding account
+                    </label>
+                    <select
+                      id="card-source"
+                      value={cardSourceId}
+                      onChange={(e) => setCardSourceId(e.target.value)}
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                    >
+                      {sourceAccounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.name} ({formatMoney(account.balance, account.currency)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="card-select" className="block text-[13px] font-semibold text-[#121212]">
+                    Linked card
+                  </label>
+                  <select
+                    id="card-select"
+                    value={cardId}
+                    onChange={(e) => setCardId(e.target.value)}
+                    className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                  >
+                    {profile.cards.map((card) => (
+                      <option key={card.id} value={card.id}>
+                        {card.label} · {card.number ?? `•••• ${card.last4}`}
+                      </option>
+                    ))}
+                  </select>
+                  {profile.cards.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const card = profile.cards.find((c) => c.id === cardId) ?? profile.cards[0];
+                        const linked = card ? profile.accounts.find((a) => a.id === card.linkedAccountId) : undefined;
+                        if (!linked) {
+                          notify("Link a card to your profile first to transfer funds.");
+                          return;
+                        }
+                        notify(`${card.label} is linked to ${linked.name}.`);
+                      }}
+                      className="mt-2 w-full rounded-[6px] border border-nbc-navy bg-[#f8f6f1] py-2 text-[13px] font-semibold text-nbc-navy hover:bg-nbc-navy hover:text-white"
+                    >
+                      Link a card
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="card-amt" className="block text-[13px] font-semibold text-[#121212]">
+                      Amount ($)
+                    </label>
+                    <input
+                      id="card-amt"
+                      type="number"
+                      step="0.01"
+                      min="1"
+                      value={cardAmt}
+                      onChange={(e) => setCardAmt(e.target.value)}
+                      required
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3.5 py-2.5 text-[15px] font-semibold tabular-nums text-[#121212]"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="card-memo" className="block text-[13px] font-semibold text-[#121212]">
+                      Reference note (optional)
+                    </label>
+                    <input
+                      id="card-memo"
+                      type="text"
+                      value={cardMemo}
+                      onChange={(e) => setCardMemo(e.target.value)}
+                      placeholder="e.g., Monthly top-up"
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3.5 py-2.5 text-[14px] text-[#121212]"
+                    />
+                  </div>
+                </div>
+
+                <button type="submit" disabled={transferLockActive} className="nbc-btn nbc-btn-primary disabled:opacity-50">
+                  Transfer to card
+                </button>
+              </form>
+            )}
 
             {moveMode === "internal" && (
               <form
