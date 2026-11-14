@@ -85,13 +85,49 @@ const INITIAL_AUDIT: AuditLogEntry[] = [
   },
 ];
 
+const normalizeCredentialString = (value: string | undefined | null): string =>
+  String(value ?? "")
+    .replace(/[\u00A0\u200B-\u200D\uFEFF]/g, "")
+    .trim();
+
 const sanitizeCustomProfiles = (profiles: BankUserProfile[] = []): BankUserProfile[] =>
   profiles
-    .filter((profile) => Boolean(profile?.email))
+    .filter((profile) => Boolean(normalizeCredentialString(profile?.email)))
     .map((profile) => ({
       ...profile,
+      email: normalizeCredentialString(profile.email),
+      password: normalizeCredentialString(profile.password),
+      pin: normalizeCredentialString(profile.pin),
       cards: normalizeBankCardList(profile.cards),
     }));
+
+const mergeRemoteProfiles = (existing: BankUserProfile[], remote: BankUserProfile[]): BankUserProfile[] => {
+  const merged = sanitizeCustomProfiles(existing);
+
+  for (const profile of sanitizeCustomProfiles(remote)) {
+    const index = merged.findIndex((entry) => entry.email.toLowerCase() === profile.email.toLowerCase());
+    if (index >= 0) {
+      merged[index] = {
+        ...merged[index],
+        ...profile,
+        email: normalizeCredentialString(profile.email) || merged[index].email,
+        password: normalizeCredentialString(profile.password) || merged[index].password,
+        pin: normalizeCredentialString(profile.pin) || merged[index].pin || "1988",
+        cards: normalizeBankCardList(profile.cards ?? merged[index].cards ?? []),
+      };
+    } else {
+      merged.push({
+        ...profile,
+        cards: normalizeBankCardList(profile.cards),
+      });
+    }
+  }
+
+  return merged.filter(
+    (profile, index, list) =>
+      list.findIndex((entry) => entry.email.toLowerCase() === profile.email.toLowerCase()) === index
+  );
+};
 
 export default function App() {
   const [route, setRoute] = useState<PageRoute>(() => hashToRoute(window.location.hash));
@@ -114,37 +150,29 @@ export default function App() {
     if (!isSupabaseConfigured) return;
 
     let isMounted = true;
+    let intervalId: number | undefined;
 
-    void (async () => {
+    const refreshProfiles = async () => {
       try {
         const remoteProfiles = await fetchProfiles();
-        if (!isMounted || remoteProfiles.length === 0) return;
+        if (!isMounted) return;
 
-        setCustomProfiles((prev) => {
-          const merged = [...prev];
-
-          for (const remote of remoteProfiles) {
-            const index = merged.findIndex((entry) => entry.email.toLowerCase() === remote.email.toLowerCase());
-            if (index >= 0) {
-              merged[index] = {
-                ...merged[index],
-                ...remote,
-                pin: remote.pin || merged[index].pin || "1988",
-              };
-            } else {
-              merged.push(remote);
-            }
-          }
-
-          return merged;
-        });
+        setCustomProfiles((prev) => mergeRemoteProfiles(prev, remoteProfiles));
       } catch (error) {
         console.warn("Supabase profile sync skipped:", error);
       }
-    })();
+    };
+
+    void refreshProfiles();
+    intervalId = window.setInterval(() => {
+      void refreshProfiles();
+    }, 15000);
 
     return () => {
       isMounted = false;
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
     };
   }, []);
 

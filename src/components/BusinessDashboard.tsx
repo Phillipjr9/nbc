@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  logoBnMark,
   logoNbc,
   pictoCarteCreditRed,
   pictoComptesRed,
@@ -81,6 +82,16 @@ export default function BusinessDashboard({
       setIsAddingCard(true);
     }
   }, [profile.cards.length, tab]);
+
+  const txTimersRef = useRef<number[]>([]);
+  const clearAnimatedTxTimers = () => {
+    txTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
+    txTimersRef.current = [];
+  };
+
+  useEffect(() => {
+    return () => clearAnimatedTxTimers();
+  }, []);
 
   const [toast, setToast] = useState<string | null>(null);
   const [activeAnimatedTx, setActiveAnimatedTx] = useState<AnimatedTxPayload | null>(null);
@@ -415,14 +426,21 @@ export default function BusinessDashboard({
   };
 
   const runAnimatedTx = (payload: AnimatedTxPayload, commit: () => string[]) => {
+    clearAnimatedTxTimers();
     setActiveAnimatedTx(payload);
     setAnimatedTxPhase("verifying");
-    window.setTimeout(() => setAnimatedTxPhase("sending"), 420);
-    window.setTimeout(() => {
-      const ids = commit();
-      if (ids.length) setRecentTxIds((prev) => [...ids, ...prev].slice(0, 10));
-      setAnimatedTxPhase("completed");
+
+    const sendingTimer = window.setTimeout(() => setAnimatedTxPhase("sending"), 420);
+    const completeTimer = window.setTimeout(() => {
+      try {
+        const ids = commit();
+        if (ids.length) setRecentTxIds((prev) => [...ids, ...prev].slice(0, 10));
+      } finally {
+        setAnimatedTxPhase("completed");
+      }
     }, 1150);
+
+    txTimersRef.current = [sendingTimer, completeTimer];
   };
 
   const summary = useMemo(() => {
