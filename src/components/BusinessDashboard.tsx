@@ -66,7 +66,7 @@ export default function BusinessDashboard({
   onGoHelp,
   onSignOut,
 }: Props) {
-  const [tab, setTab] = useState<BizTab>("account");
+  const [tab, setTab] = useState<BizTab>("treasury");
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
