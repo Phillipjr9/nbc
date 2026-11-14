@@ -13,6 +13,8 @@ import {
   AdminOps,
   ApprovalRequest,
   ManagedUserEntry,
+  applyCardApprovalDecision,
+  CardApprovalPayload,
 } from "./banking/adminOps";
 import { hashToRoute, routeToHash } from "./banking/routeMapper";
 import { runDueSchedules } from "./banking/bankingTypes";
@@ -565,6 +567,16 @@ export default function App() {
       }
       if (request.action === "config.publish" && payload.config) {
         setBankConfig(payload.config as typeof bankConfig);
+      }
+      if (request.action === "card.issue") {
+        const cp = payload as CardApprovalPayload | undefined;
+        const pendingCards = cp?.pendingCards ?? [];
+        const pendingCard = pendingCards.find((p) => p.approvalRequestId === id);
+        if (pendingCard) {
+          updateUserByKey(request.targetKey, (prev) =>
+            applyCardApprovalDecision(prev, pendingCard, decision, decider)
+          );
+        }
       }
     }
   };

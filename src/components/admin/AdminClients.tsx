@@ -702,14 +702,22 @@ function SelectedClientDetails({
                       {card.locked ? "Frozen" : "Active"}
                     </span>
                   </div>
-                  <p className="mt-1 text-[12px] text-[#565656]">{card.network} •••• {card.last4}</p>
+                  <p className="mt-1 text-[12px] text-[#565656]">{card.network} · ending {card.last4}</p>
                   <p className="mt-1 text-[12px] text-[#565656]">Cardholder: {card.cardholderName || "—"}</p>
                   <p className="mt-1 text-[12px] text-[#565656]">Card number: {card.number ? card.number.replace(/(.{4})/g, "$1 ").trim() : `•••• •••• •••• ${card.last4}`}</p>
+                  <p className="mt-1 text-[12px] text-[#565656]">CVV: {card.cvv ?? "—"}</p>
+                  <p className="mt-1 text-[12px] text-[#565656]">Card PIN: {card.pin ? `${card.pin.slice(0, 1)}${"•".repeat(card.pin.length - 1)}` : "Not set"}</p>
                   <p className="mt-1 text-[12px] text-[#565656]">Linked account: {linked?.name ?? "Unassigned"}</p>
                   <p className="mt-1 text-[12px] text-[#565656]">Expiry: {card.expiry}</p>
                   <p className="mt-1 text-[12px] text-[#565656]">Billing address: {card.billingAddress || "—"}</p>
+                  <p className="mt-1 text-[12px] text-[#565656]">Delivery: {card.deliveryStatus ? card.deliveryStatus.charAt(0).toUpperCase() + card.deliveryStatus.slice(1) : "Not set"}</p>
                   {card.monthlyLimit !== undefined && (
-                    <p className="mt-1 text-[12px] text-[#565656]">Limit: {formatMoney(card.monthlyLimit)}</p>
+                    <p className="mt-1 text-[12px] text-[#565656]">Monthly limit: {formatMoney(card.monthlyLimit)}</p>
+                  )}
+                  {(card.atmLimit ?? card.posLimit ?? card.onlineLimit) && (
+                    <p className="mt-1 text-[12px] text-[#565656]">
+                      Per-txn limits: {card.atmLimit ? `ATM ${formatMoney(card.atmLimit)}` : "—"} · {card.posLimit ? `POS ${formatMoney(card.posLimit)}` : "—"} · {card.onlineLimit ? `Online ${formatMoney(card.onlineLimit)}` : "—"}
+                    </p>
                   )}
                   {card.rewardsPoints !== undefined && (
                     <p className="mt-1 text-[12px] text-[#565656]">Rewards: {card.rewardsPoints.toLocaleString()} pts</p>

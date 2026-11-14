@@ -18,7 +18,7 @@ import {
   todayIso,
   TX_CATEGORIES,
 } from "../../banking/adminOps";
-import { Transaction, TRANSFER_FAILURE_REASONS, formatMoney } from "../../banking/bankingTypes";
+import { Transaction, TRANSFER_FAILURE_REASONS, REVERSAL_REASONS, formatMoney } from "../../banking/bankingTypes";
 import { Field, inputCls } from "./AdminClients";
 
 const subtractDays = (days: number) => {
@@ -69,6 +69,8 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
   const [toDate, setToDate] = useState("");
   const [visibleCount, setVisibleCount] = useState(25);
   const [editingTx, setEditingTx] = useState<{ userKey: string; tx: Transaction } | null>(null);
+  const [reversalReason, setReversalReason] = useState<string>(REVERSAL_REASONS[0]);
+  const [pendingReversal, setPendingReversal] = useState<{ userKey: string; tx: Transaction } | null>(null);
 
   const rows = useMemo(() => {
     const out: { userKey: string; userName: string; accountName: string; currency: "CAD" | "USD"; tx: Transaction }[] = [];
@@ -183,7 +185,7 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
     ops.notify(`Entry marked ${next}.`);
   };
 
-  const reverseTx = (userKey: string, tx: Transaction) => {
+  const reverseTx = (userKey: string, tx: Transaction, reason: string) => {
     if (!can(ops.identity, "transactions.reverse")) {
       ops.notify("Your role cannot reverse ledger entries.");
       return;
@@ -193,6 +195,7 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
       userKey,
       (prev) => {
         const normalizedTx = prev.transactions.find((candidate) => candidate.id === tx.id) ?? tx;
+        // Find paired transaction (opposite amount, same date) for internal transfers
         const paired = prev.transactions.find((candidate) => {
           if (candidate.id === normalizedTx.id) return false;
           if (candidate.accountId === normalizedTx.accountId) return false;
@@ -211,17 +214,24 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
         const accountIds = new Set<string>([normalizedTx.accountId]);
         if (paired) accountIds.add(paired.accountId);
 
+        // Determine if this is an external transfer (no paired transaction found)
+        const isExternalTransfer = !paired && normalizedTx.category === "Transfer";
+
         const reversedEntries = [
           {
             id: newId("rev"),
             accountId: normalizedTx.accountId,
             date: todayIso(),
-            description: `Reversal — ${normalizedTx.description}`,
+            description: isExternalTransfer
+              ? `Reversal — ${normalizedTx.description} [${reason}]`
+              : `Reversal — ${normalizedTx.description}`,
             category: "Transfer" as const,
             amount: -normalizedTx.amount,
             status: "Posted" as const,
             reference: `REV-${randomDigits(6)}`,
             createdBy: "Administration",
+            failureReason: isExternalTransfer ? reason : undefined,
+            failureDetails: isExternalTransfer ? `Reversed by administration: ${reason}` : undefined,
           },
           ...(paired
             ? [{
@@ -253,7 +263,7 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
         };
       },
       "TX_REVERSED",
-      `Reversed "${tx.description}" (${formatMoney(tx.amount)})`,
+      `Reversed "${tx.description}" (${formatMoney(tx.amount)}) — Reason: ${reason}`,
       "warning"
     );
     ops.notify("Reversal posted with a counter-entry.");
@@ -836,6 +846,72 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
         </form>
       )}
 
+      {/* Reversal confirmation dialog */}
+      {pendingReversal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPendingReversal(null)}>
+          <div className="w-full max-w-md rounded-[6px] border border-[#e5e2da] bg-white p-5 shadow-lg" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-[16px] font-bold text-nbc-navy">Confirm reversal</h3>
+            <p className="mt-1 text-[13px] text-[#565656]">
+              Reversal reason is recorded on the reversed entry and any paired transaction.
+            </p>
+
+            <div className="mt-4 rounded-[6px] border border-[#e5e2da] bg-[#fcfbf8] p-4">
+              <div className="flex justify-between gap-4">
+                <div>
+                  <p className="text-[11px] text-[#565656]">Transaction</p>
+                  <p className="font-semibold text-[#121212]">{pendingReversal.tx.description}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[11px] text-[#565656]">Amount</p>
+                  <p className={`font-semibold tabular-nums ${pendingReversal.tx.amount >= 0 ? "text-[#017a33]" : "text-[#121212]"}`}>
+                    {pendingReversal.tx.amount >= 0 ? "+" : ""}{formatMoney(pendingReversal.tx.amount, "CAD")}
+                  </p>
+                </div>
+              </div>
+              <p className="mt-2 text-[11px] text-[#565656]">
+                {pendingReversal.tx.date} · {pendingReversal.tx.status ?? "Posted"}
+              </p>
+            </div>
+
+            <div className="mt-4">
+              <label className="block text-[13px] font-semibold text-[#121212]">
+                Reversal reason
+              </label>
+              <select
+                value={reversalReason}
+                onChange={(e) => setReversalReason(e.target.value)}
+                className="mt-1 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+              >
+                {REVERSAL_REASONS.map((reason) => (
+                  <option key={reason} value={reason}>{reason}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  reverseTx(pendingReversal.userKey, pendingReversal.tx, reversalReason);
+                  setPendingReversal(null);
+                  setReversalReason(REVERSAL_REASONS[0]);
+                }}
+                className="flex-1 rounded-[6px] bg-nbc-red py-2.5 text-[13px] font-semibold text-white hover:bg-nbc-red-dark"
+              >
+                Confirm reversal
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingReversal(null)}
+                className="rounded-[6px] border border-[#c9c3b6] px-4 py-2.5 text-[13px] font-semibold text-nbc-navy hover:bg-[#f4f1ea]"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Ledger */}
       <div className="overflow-hidden rounded-[6px] border border-[#e5e2da] bg-white">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e5e2da] bg-[#fcfbf8] px-4 py-3">
@@ -875,7 +951,7 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
                   {r.tx.status ?? "Posted"}
                 </button>
                 <button type="button" onClick={() => setEditingTx({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2 py-0.5 text-[11px] font-semibold text-nbc-navy">Edit</button>
-                <button type="button" onClick={() => reverseTx(r.userKey, r.tx)} className="rounded bg-[#f4f1ea] px-2 py-0.5 text-[11px] font-semibold text-nbc-navy">Reverse</button>
+                <button type="button" onClick={() => setPendingReversal({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2 py-0.5 text-[11px] font-semibold text-nbc-navy">Reverse</button>
                 <button type="button" onClick={() => deleteTx(r.userKey, r.tx)} className="rounded bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Delete</button>
               </div>
             </li>
@@ -932,7 +1008,7 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
                   <td className="whitespace-nowrap px-3 py-2.5 text-right">
                     <div className="inline-flex gap-1">
                       <button type="button" onClick={() => setEditingTx({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2 py-0.5 text-[11px] font-semibold text-nbc-navy hover:bg-[#e8e3d8]">Edit</button>
-                      <button type="button" onClick={() => reverseTx(r.userKey, r.tx)} className="rounded bg-[#f4f1ea] px-2 py-0.5 text-[11px] font-semibold text-nbc-navy hover:bg-amber-100">Reverse</button>
+                      <button type="button" onClick={() => setPendingReversal({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2 py-0.5 text-[11px] font-semibold text-nbc-navy hover:bg-amber-100">Reverse</button>
                       <button type="button" onClick={() => deleteTx(r.userKey, r.tx)} className="rounded bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700 hover:bg-rose-200">Delete</button>
                     </div>
                   </td>

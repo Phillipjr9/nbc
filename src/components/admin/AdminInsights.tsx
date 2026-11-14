@@ -235,7 +235,7 @@ export function AdminSearch({ ops, onOpenTab, onSelectKey }: AdminPanelProps) {
       }
       for (const c of u.profile.cards) {
         if (c.label.toLowerCase().includes(q) || c.last4.includes(q)) {
-          hits.push({ kind: "Card", label: `${c.label} •••• ${c.last4}`, meta: `${u.profile.fullName} · limit ${c.monthlyLimit ? formatMoney(c.monthlyLimit) : "—"}`, key: u.key, tab: "cards" });
+          hits.push({ kind: "Card", label: `${c.label} · ${c.number ?? `•••• ${c.last4}`}`, meta: `${u.profile.fullName} · limit ${c.monthlyLimit ? formatMoney(c.monthlyLimit) : "—"}`, key: u.key, tab: "cards" });
         }
       }
     }
