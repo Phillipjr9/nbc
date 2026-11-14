@@ -11,6 +11,7 @@ import {
   NewClientAccountInput,
   NewClientInput,
   statementCsv,
+  can,
   downloadFile,
   todayIso,
 } from "../../banking/adminOps";
@@ -513,6 +514,7 @@ export default function AdminClients({ ops, selectedKey, onSelectKey, onOpenTab,
           {filtered.map((u) => {
             const t = totalsFor(u.profile);
             const isFrozen = u.profile.status === "frozen";
+            const isTransferPaused = u.profile.transfersPaused === true;
             return (
               <li
                 key={u.key}
@@ -553,6 +555,10 @@ export default function AdminClients({ ops, selectedKey, onSelectKey, onOpenTab,
                   <button
                     type="button"
                     onClick={() => {
+                      if (!can(ops.identity, "clients.freeze")) {
+                        ops.notify("Your role cannot change client account holds.");
+                        return;
+                      }
                       ops.onUpdateUser(
                         u.key,
                         (prev) => ({ ...prev, status: isFrozen ? "active" : "frozen" }),
@@ -565,6 +571,33 @@ export default function AdminClients({ ops, selectedKey, onSelectKey, onOpenTab,
                     className={`rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${isFrozen ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}
                   >
                     {isFrozen ? "Unfreeze" : "Freeze"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!can(ops.identity, "transactions.pause")) {
+                        ops.notify("Your role cannot pause client transfers.");
+                        return;
+                      }
+                      const enabled = !isTransferPaused;
+                      ops.onUpdateUser(
+                        u.key,
+                        (prev) => ({
+                          ...prev,
+                          transfersPaused: enabled,
+                          transferPauseReason: enabled ? "Administrative review — outgoing transfers paused" : undefined,
+                          transferPausedBy: enabled ? (ops.identity?.name ?? "Administration") : undefined,
+                          transferPausedAt: new Date().toISOString(),
+                        }),
+                        enabled ? "TRANSFER_PAUSED" : "TRANSFER_RESUMED",
+                        `${enabled ? "Paused" : "Resumed"} outgoing transfers for ${u.profile.fullName}`,
+                        enabled ? "warning" : "info"
+                      );
+                      ops.notify(enabled ? "Outgoing transfers are now paused for this client." : "Outgoing transfers have been resumed.");
+                    }}
+                    className={`rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${isTransferPaused ? "bg-emerald-100 text-emerald-800" : "bg-[#f4f1ea] text-nbc-navy"}`}
+                  >
+                    {isTransferPaused ? "Resume transfers" : "Pause transfers"}
                   </button>
                   <button
                     type="button"
@@ -655,6 +688,38 @@ function SelectedClientDetails({
           <p className="mt-1 italic text-[#666]">{p.notes || "No internal notes."}</p>
         </DetailBlock>
       </div>
+      {p.cards.length > 0 && (
+        <div className="border-t border-[#ececec] px-5 py-4">
+          <h4 className="mb-3 text-[12.5px] font-bold uppercase tracking-wide text-[#565656]">Cards on file</h4>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {p.cards.map((card) => {
+              const linked = p.accounts.find((a) => a.id === card.linkedAccountId);
+              return (
+                <div key={card.id} className="rounded-[6px] border border-[#e5e2da] bg-[#faf9f6] p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[13px] font-bold text-nbc-navy">{card.label}</p>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${card.locked ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-800"}`}>
+                      {card.locked ? "Frozen" : "Active"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[12px] text-[#565656]">{card.network} •••• {card.last4}</p>
+                  <p className="mt-1 text-[12px] text-[#565656]">Cardholder: {card.cardholderName || "—"}</p>
+                  <p className="mt-1 text-[12px] text-[#565656]">Card number: {card.number ? card.number.replace(/(.{4})/g, "$1 ").trim() : `•••• •••• •••• ${card.last4}`}</p>
+                  <p className="mt-1 text-[12px] text-[#565656]">Linked account: {linked?.name ?? "Unassigned"}</p>
+                  <p className="mt-1 text-[12px] text-[#565656]">Expiry: {card.expiry}</p>
+                  <p className="mt-1 text-[12px] text-[#565656]">Billing address: {card.billingAddress || "—"}</p>
+                  {card.monthlyLimit !== undefined && (
+                    <p className="mt-1 text-[12px] text-[#565656]">Limit: {formatMoney(card.monthlyLimit)}</p>
+                  )}
+                  {card.rewardsPoints !== undefined && (
+                    <p className="mt-1 text-[12px] text-[#565656]">Rewards: {card.rewardsPoints.toLocaleString()} pts</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 border-t border-[#ececec] px-5 py-3.5 text-[12px]">
         <LockIcon className="h-3.5 w-3.5 text-[#565656]" />
         <span className="text-[#565656]">Quick links:</span>

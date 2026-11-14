@@ -80,12 +80,13 @@ export default function Dashboard({
   const prefs: ClientPreferences = { ...DEFAULT_PREFERENCES, ...(profile.preferences ?? {}) };
 
   // Transfers & payments sub-navigation
-  const [moveMode, setMoveMode] = useState<"internal" | "etransfer" | "bills" | "deposit">("internal");
+  const [moveMode, setMoveMode] = useState<"internal" | "card" | "etransfer" | "bills" | "deposit">("internal");
 
   const sourceAccounts = useMemo(
     () => profile.accounts.filter((a) => a.category === "chequing" || a.category === "savings"),
     [profile.accounts]
   );
+  const transferLockActive = profile.status === "frozen" || !!profile.transfersPaused;
 
   // Internal transfer
   const [fromId, setFromId] = useState(sourceAccounts[0]?.id ?? "");
@@ -112,6 +113,13 @@ export default function Dashboard({
   const [depTargetId, setDepTargetId] = useState(sourceAccounts[0]?.id ?? "");
   const [depFrom, setDepFrom] = useState("Revenu Québec — Refund");
   const [depAmt, setDepAmt] = useState("420.00");
+
+  // Card transfer / cash add
+  const [cardTxType, setCardTxType] = useState<"transfer" | "cash" | "from-card">("transfer");
+  const [cardSourceId, setCardSourceId] = useState(sourceAccounts[0]?.id ?? "");
+  const [cardId, setCardId] = useState(profile.cards[0]?.id ?? "");
+  const [cardAmt, setCardAmt] = useState("250.00");
+  const [cardMemo, setCardMemo] = useState("");
 
   // Scheduled / recurring transfers
   const [schFromId, setSchFromId] = useState(sourceAccounts[0]?.id ?? "");
@@ -219,6 +227,14 @@ export default function Dashboard({
   // Handlers
   const handleInternalTransfer = (e: React.FormEvent) => {
     e.preventDefault();
+    if (transferLockActive) {
+      notify(
+        profile.status === "frozen"
+          ? "This account is on hold and cannot send transfers."
+          : "Outgoing transfers are paused for this account."
+      );
+      return;
+    }
     const amt = Number(transferAmt);
     const src = profile.accounts.find((a) => a.id === fromId);
     const dst = profile.accounts.find((a) => a.id === toId);
@@ -322,6 +338,14 @@ export default function Dashboard({
 
   const handleSendEtransfer = (e: React.FormEvent) => {
     e.preventDefault();
+    if (transferLockActive) {
+      notify(
+        profile.status === "frozen"
+          ? "This account is on hold and cannot send transfers."
+          : "Outgoing transfers are paused for this account."
+      );
+      return;
+    }
     const amt = Number(etrAmt);
     const src = profile.accounts.find((a) => a.id === etrSourceId) ?? sourceAccounts[0];
     const rec = profile.recipients.find((r) => r.id === recipientId) ?? profile.recipients[0];
@@ -394,6 +418,14 @@ export default function Dashboard({
 
   const handlePayBill = (e: React.FormEvent) => {
     e.preventDefault();
+    if (transferLockActive) {
+      notify(
+        profile.status === "frozen"
+          ? "This account is on hold and cannot send transfers."
+          : "Outgoing transfers are paused for this account."
+      );
+      return;
+    }
     const amt = Number(billAmt);
     const src = profile.accounts.find((a) => a.id === billSourceId) ?? sourceAccounts[0];
     const payee = profile.payees.find((p) => p.id === payeeId) ?? profile.payees[0];
@@ -458,6 +490,163 @@ export default function Dashboard({
     setNewPayeeName("");
     setNewPayeeRef("");
     notify(`Payee ${newPayeeName.trim()} added.`);
+  };
+
+  const handleCardTransfer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (transferLockActive) {
+      notify(
+        profile.status === "frozen"
+          ? "This account is on hold and cannot send transfers."
+          : "Outgoing transfers are paused for this account."
+      );
+      return;
+    }
+
+    const amt = Number(cardAmt);
+    const card = profile.cards.find((c) => c.id === cardId) ?? profile.cards[0];
+    const linked = card ? profile.accounts.find((a) => a.id === card.linkedAccountId) : undefined;
+    const targetAccount = profile.accounts.find((a) => a.id === cardSourceId) ?? sourceAccounts[0];
+
+    if (!card || !linked) {
+      notify("Select a valid linked card.");
+      return;
+    }
+
+    if (!targetAccount) {
+      notify("Choose an account for this transfer.");
+      return;
+    }
+
+    if (!amt || amt <= 0) {
+      notify("Enter a valid amount to transfer.");
+      return;
+    }
+
+    const memoClean = cardMemo.trim();
+
+    if (cardTxType === "from-card") {
+      if (linked.id === targetAccount.id) {
+        notify("Choose a different destination account than the card's linked account.");
+        return;
+      }
+      const updatedLinkedBalance = Math.round((linked.balance - amt) * 100) / 100;
+      const updatedTargetBalance = Math.round((targetAccount.balance + amt) * 100) / 100;
+
+      runAnimatedTransaction(
+        {
+          kind: "transfer",
+          amount: amt,
+          currency: linked.currency,
+          fromLabel: `${card.label} (${linked.name})`,
+          toLabel: targetAccount.name,
+          memo: memoClean || undefined,
+          reference: makeReference("CRD"),
+          timestamp: `${todayIso()} · ${nowStamp()}`,
+          updatedBalanceLabel: `${targetAccount.name}: ${formatMoney(updatedTargetBalance, targetAccount.currency)}`,
+        },
+        () => {
+          const outTxId = `card-withdraw-${Date.now()}`;
+          const inTxId = `card-credit-${Date.now()}`;
+          onUpdateProfile((prev) => ({
+            ...prev,
+            accounts: prev.accounts.map((account) => {
+              if (account.id === linked.id) return { ...account, balance: updatedLinkedBalance };
+              if (account.id === targetAccount.id) return { ...account, balance: updatedTargetBalance };
+              return account;
+            }),
+            transactions: [
+              {
+                id: outTxId,
+                accountId: linked.id,
+                date: todayIso(),
+                description: `Funds from ${card.label}${memoClean ? ` — ${memoClean}` : ""}`,
+                category: "Transfer",
+                amount: -amt,
+                status: "Posted",
+              },
+              {
+                id: inTxId,
+                accountId: targetAccount.id,
+                date: todayIso(),
+                description: `Card funds added to ${targetAccount.name}${memoClean ? ` — ${memoClean}` : ""}`,
+                category: "Transfer",
+                amount: amt,
+                status: "Posted",
+              },
+              ...prev.transactions,
+            ],
+          }));
+          setCardMemo("");
+          return [outTxId, inTxId];
+        }
+      );
+      return;
+    }
+
+    const src = cardTxType === "cash" ? targetAccount : targetAccount;
+    if ((src.category === "chequing" || src.category === "savings") && balanceAvailability(src, profile.transactions).available < amt) {
+      notify(
+        `There are not enough available funds in ${src.name}. Available: ${formatMoney(
+          balanceAvailability(src, profile.transactions).available,
+          src.currency
+        )}.`
+      );
+      return;
+    }
+
+    const updatedSrcBalance = Math.round((src.balance - amt) * 100) / 100;
+    const updatedLinkedBalance = Math.round((linked.balance + amt) * 100) / 100;
+    const label = cardTxType === "cash" ? "Cash advance" : "Card transfer";
+
+    runAnimatedTransaction(
+      {
+        kind: "transfer",
+        amount: amt,
+        currency: src.currency,
+        fromLabel: src.name,
+        toLabel: `${card.label} (${linked.name})`,
+        memo: memoClean || undefined,
+        reference: makeReference("CRD"),
+        timestamp: `${todayIso()} · ${nowStamp()}`,
+        updatedBalanceLabel: `${src.name}: ${formatMoney(updatedSrcBalance, src.currency)}`,
+      },
+      () => {
+        const outTxId = `card-out-${Date.now()}`;
+        const inTxId = `card-in-${Date.now()}`;
+        onUpdateProfile((prev) => ({
+          ...prev,
+          accounts: prev.accounts.map((account) => {
+            if (account.id === src.id) return { ...account, balance: updatedSrcBalance };
+            if (account.id === linked.id) return { ...account, balance: updatedLinkedBalance };
+            return account;
+          }),
+          transactions: [
+            {
+              id: outTxId,
+              accountId: src.id,
+              date: todayIso(),
+              description: `${label} to ${card.label}${memoClean ? ` — ${memoClean}` : ""}`,
+              category: "Transfer",
+              amount: -amt,
+              status: "Posted",
+            },
+            {
+              id: inTxId,
+              accountId: linked.id,
+              date: todayIso(),
+              description: `${label} • ${card.label}${memoClean ? ` — ${memoClean}` : ""}`,
+              category: "Transfer",
+              amount: amt,
+              status: "Posted",
+            },
+            ...prev.transactions,
+          ],
+        }));
+        setCardMemo("");
+        return [outTxId, inTxId];
+      }
+    );
   };
 
   const handleChequeDeposit = (e: React.FormEvent) => {
@@ -909,9 +1098,12 @@ export default function Dashboard({
       )}
 
       <main className="nbc-container pt-8">
-        {profile.status === "frozen" && (
+        {(profile.status === "frozen" || profile.transfersPaused) && (
           <div className="mb-6 rounded-[6px] border border-[#f1b0b7] bg-[#fff5f5] px-5 py-4 text-[14px] text-[#842029]">
-            <strong className="font-semibold">Account notice:</strong> Outgoing transfers are temporarily restricted on this profile. Please contact Client Services at 1-888-835-6281.
+            <strong className="font-semibold">Account notice:</strong>{" "}
+            {profile.status === "frozen"
+              ? "Outgoing transfers are temporarily restricted on this profile. Please contact Client Services at 1-888-835-6281."
+              : profile.transferPauseReason ?? "Outgoing transfers are paused pending review. Please contact Client Services at 1-888-835-6281."}
           </div>
         )}
 
@@ -1674,6 +1866,7 @@ export default function Dashboard({
               {(
                 [
                   ["internal", "Between my accounts"],
+                  ["card", "Card transfer"],
                   ["etransfer", "Interac e-Transfer®"],
                   ["bills", "Pay a bill"],
                   ["deposit", "Deposit a cheque"],
@@ -1770,10 +1963,139 @@ export default function Dashboard({
 
                 <button
                   type="submit"
-                  disabled={profile.status === "frozen"}
+                  disabled={transferLockActive}
                   className="nbc-btn nbc-btn-primary disabled:opacity-50"
                 >
                   Continue and transfer
+                </button>
+              </form>
+            )}
+
+            {moveMode === "card" && (
+              <form
+                onSubmit={handleCardTransfer}
+                className="max-w-[720px] space-y-5 rounded-[6px] border border-[#e5e2da] bg-white p-6"
+              >
+                <div>
+                  <h2 className="text-[20px] font-bold text-nbc-navy">Transfer funds to a linked card</h2>
+                  <p className="mt-1 text-[14px] text-[#565656]">
+                    Add cash to a linked card or move money from your account to a card that is already linked to your profile.
+                  </p>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="card-tx-type" className="block text-[13px] font-semibold text-[#121212]">
+                      Transaction type
+                    </label>
+                    <select
+                      id="card-tx-type"
+                      value={cardTxType}
+                      onChange={(e) => setCardTxType(e.target.value as "transfer" | "cash" | "from-card")}
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                    >
+                      <option value="transfer">Transfer to card</option>
+                      <option value="cash">Add cash to card</option>
+                      <option value="from-card">Add funds from card</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="card-source" className="block text-[13px] font-semibold text-[#121212]">
+                      Funding account
+                    </label>
+                    <select
+                      id="card-source"
+                      value={cardSourceId}
+                      onChange={(e) => setCardSourceId(e.target.value)}
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                    >
+                      {sourceAccounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.name} ({formatMoney(account.balance, account.currency)})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="card-select" className="block text-[13px] font-semibold text-[#121212]">
+                    Linked card
+                  </label>
+                  <select
+                    id="card-select"
+                    value={cardId}
+                    onChange={(e) => setCardId(e.target.value)}
+                    className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                  >
+                    {profile.cards.map((card) => (
+                      <option key={card.id} value={card.id}>
+                        {card.label} •••• {card.last4}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {profile.cards.length > 0 && (() => {
+                  const selectedCard = profile.cards.find((c) => c.id === cardId) ?? profile.cards[0];
+                  const linked = selectedCard ? profile.accounts.find((a) => a.id === selectedCard.linkedAccountId) : undefined;
+                  return (
+                    <div className="rounded-[6px] bg-[#f8f6f1] p-3 text-[12.5px] text-[#565656]">
+                      <p className="font-semibold text-nbc-navy">{selectedCard?.label ?? "Selected card"}</p>
+                      <p className="mt-0.5">
+                        Linked to: <span className="font-semibold text-[#121212]">{linked?.name ?? "No linked account"}</span>
+                      </p>
+                      {selectedCard?.monthlyLimit ? (
+                        <p className="mt-0.5">
+                          Monthly limit: <span className="font-semibold tabular-nums text-[#121212]">{formatMoney(selectedCard.monthlyLimit)}</span>
+                        </p>
+                      ) : null}
+                      {cardTxType === "from-card" && linked && (
+                        <p className="mt-0.5">
+                          Available from card: <span className="font-semibold tabular-nums text-[#121212]">{formatMoney(linked.balance, linked.currency)}</span>
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="card-amt" className="block text-[13px] font-semibold text-[#121212]">
+                      Amount ($)
+                    </label>
+                    <input
+                      id="card-amt"
+                      type="number"
+                      step="0.01"
+                      min="1"
+                      value={cardAmt}
+                      onChange={(e) => setCardAmt(e.target.value)}
+                      required
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3.5 py-2.5 text-[15px] font-semibold tabular-nums text-[#121212]"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="card-memo" className="block text-[13px] font-semibold text-[#121212]">
+                      Reference note (optional)
+                    </label>
+                    <input
+                      id="card-memo"
+                      type="text"
+                      value={cardMemo}
+                      onChange={(e) => setCardMemo(e.target.value)}
+                      placeholder="e.g., Monthly top-up"
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3.5 py-2.5 text-[14px] text-[#121212]"
+                    />
+                  </div>
+                </div>
+
+                <button type="submit" disabled={transferLockActive} className="nbc-btn nbc-btn-primary disabled:opacity-50">
+                  {cardTxType === "cash"
+                    ? "Add cash to card"
+                    : cardTxType === "from-card"
+                      ? "Add funds from card"
+                      : "Transfer to card"}
                 </button>
               </form>
             )}
@@ -1851,7 +2173,7 @@ export default function Dashboard({
                   </div>
                   <button
                     type="submit"
-                    disabled={profile.status === "frozen"}
+                    disabled={transferLockActive}
                     className="nbc-btn nbc-btn-primary disabled:opacity-50"
                   >
                     Send Interac e-Transfer®
@@ -1956,7 +2278,7 @@ export default function Dashboard({
                   </div>
                   <button
                     type="submit"
-                    disabled={profile.status === "frozen"}
+                    disabled={transferLockActive}
                     className="nbc-btn nbc-btn-primary disabled:opacity-50"
                   >
                     Pay bill
@@ -2070,6 +2392,14 @@ export default function Dashboard({
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
+                  if (transferLockActive) {
+                    notify(
+                      profile.status === "frozen"
+                        ? "This account is on hold and cannot send transfers."
+                        : "Outgoing transfers are paused for this account."
+                    );
+                    return;
+                  }
                   const amt = Number(schAmount);
                   const from = profile.accounts.find((a) => a.id === schFromId);
                   const to = profile.accounts.find((a) => a.id === schToId);
@@ -2187,7 +2517,7 @@ export default function Dashboard({
                     />
                   </label>
                 </div>
-                <button type="submit" className="nbc-btn nbc-btn-primary">
+                <button type="submit" disabled={transferLockActive} className="nbc-btn nbc-btn-primary disabled:opacity-50">
                   Schedule transfer
                 </button>
               </form>

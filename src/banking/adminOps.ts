@@ -47,6 +47,7 @@ export type AdminPermission =
   | "accounts.close"
   | "transactions.post"
   | "transactions.reverse"
+  | "transactions.pause"
   | "transactions.delete"
   | "cards.issue"
   | "cards.revoke"
@@ -64,6 +65,7 @@ const ROLE_PERMISSIONS: Record<AdminRole, AdminPermission[] | "*"> = {
     "accounts.adjust",
     "transactions.post",
     "transactions.reverse",
+    "transactions.pause",
     "cards.issue",
     "ops.run",
   ],
@@ -640,7 +642,9 @@ export type AdminTransactionInput = {
   amount: number;
   type: "credit" | "debit";
   category: Transaction["category"];
-  status: "Posted" | "Pending";
+  status: "Posted" | "Pending" | "Failed";
+  failureReason?: string;
+  failureDetails?: string;
   date: string;
   applyBalance: boolean;
 };
@@ -659,6 +663,8 @@ export function applyAdminTransaction(
     category: input.category,
     amount: signed,
     status: input.status,
+    failureReason: input.status === "Failed" ? input.failureReason || "Other" : undefined,
+    failureDetails: input.status === "Failed" ? input.failureDetails?.trim() || undefined : undefined,
     reference: `ADM-${randomDigits(6)}`,
     createdBy: actor,
   };
@@ -839,7 +845,9 @@ export type GeneratorInput = {
   direction: "credit" | "debit" | "mixed";
   category: Transaction["category"];
   description: string;
-  status: "Posted" | "Pending";
+  status: "Posted" | "Pending" | "Failed";
+  failureReason?: string;
+  failureDetails?: string;
   accountId: string;
   applyBalance: boolean;
 };
@@ -894,6 +902,8 @@ export function generateTransactionSeries(input: GeneratorInput, seed = 1): Gene
       category: input.category,
       amount: signed,
       status: input.status,
+      failureReason: input.status === "Failed" ? input.failureReason || "Other" : undefined,
+      failureDetails: input.status === "Failed" ? input.failureDetails?.trim() || undefined : undefined,
       reference: `GEN-${randomDigits(6)}`,
       createdBy: ADMIN_ACTOR,
     });

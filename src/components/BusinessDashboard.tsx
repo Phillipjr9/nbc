@@ -13,6 +13,7 @@ import {
   EmployeePayrollItem,
   formatMoney,
   FX_RATES,
+  TRANSFER_FAILURE_REASONS,
 } from "../banking/bankingTypes";
 import { round2 } from "../banking/adminOps";
 import BankCardVisual from "./BankCardVisual";
@@ -144,7 +145,7 @@ export default function BusinessDashboard({
     () => profile.accounts.filter((a) => a.category === "chequing" || a.category === "savings"),
     [profile.accounts]
   );
-  const [wireMode, setWireMode] = useState<"wire" | "tax" | "treasury" | "fx">("wire");
+  const [wireMode, setWireMode] = useState<"wire" | "card" | "tax" | "treasury" | "fx">("wire");
   const [wireSrcId, setWireSrcId] = useState(operatingAccounts[0]?.id ?? "");
   const [wireBeneficiary, setWireBeneficiary] = useState("Studio Bois Franc Inc.");
   const [wireBankName, setWireBankName] = useState("Bank of Montreal Corporate Treasury");
@@ -179,6 +180,20 @@ export default function BusinessDashboard({
   const [trToId, setTrToId] = useState(profile.accounts[1]?.id ?? "");
   const [trAmt, setTrAmt] = useState("10000.00");
 
+  const [cardTransferType, setCardTransferType] = useState<"transfer" | "cash" | "from-card">("transfer");
+  const [cardFundingSourceId, setCardFundingSourceId] = useState(profile.accounts[0]?.id ?? operatingAccounts[0]?.id ?? "");
+  const [businessCardId, setBusinessCardId] = useState(profile.cards[0]?.id ?? "");
+  const [businessCardAmt, setBusinessCardAmt] = useState("250.00");
+  const [businessCardMemo, setBusinessCardMemo] = useState("");
+  const [isAddingCard, setIsAddingCard] = useState(false);
+  const [newCardLabel, setNewCardLabel] = useState("Swiftdevice Business Mastercard");
+  const [newCardHolderName, setNewCardHolderName] = useState(profile.fullName.toUpperCase());
+  const [newCardNumber, setNewCardNumber] = useState("");
+  const [newCardExpiry, setNewCardExpiry] = useState("07/29");
+  const [newCardCvv, setNewCardCvv] = useState("");
+  const [newCardBillingAddress, setNewCardBillingAddress] = useState(profile.address ?? "");
+  const [newCardLinkedAccountId, setNewCardLinkedAccountId] = useState(operatingAccounts[0]?.id ?? profile.accounts[0]?.id ?? "");
+
   // Ledger filters
   const [ledgerAcc, setLedgerAcc] = useState("all");
   const [ledgerQuery, setLedgerQuery] = useState("");
@@ -189,6 +204,41 @@ export default function BusinessDashboard({
   const notify = (msg: string) => {
     setToast(msg);
     window.setTimeout(() => setToast((c) => (c === msg ? null : c)), 4000);
+  };
+
+  const recordFailedTransfer = ({
+    accountId,
+    description,
+    amount,
+    reason = TRANSFER_FAILURE_REASONS[0],
+    details,
+  }: {
+    accountId: string;
+    description: string;
+    amount: number;
+    reason?: string;
+    details?: string;
+  }) => {
+    const txId = `failed-tx-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    onUpdateProfile((prev) => ({
+      ...prev,
+      transactions: [
+        {
+          id: txId,
+          accountId,
+          date: todayIso(),
+          description,
+          category: "Transfer",
+          amount: -Math.abs(amount),
+          status: "Failed",
+          failureReason: reason,
+          failureDetails: details || undefined,
+          reference: `FLD-${Math.floor(100000 + Math.random() * 900000)}`,
+          createdBy: "System",
+        },
+        ...prev.transactions,
+      ],
+    }));
   };
 
   const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -556,6 +606,13 @@ export default function BusinessDashboard({
     const beneficiaryAccount = wireAccountNumber.trim();
 
     if (!src || !amt || amt <= 0 || amt > src.balance) {
+      recordFailedTransfer({
+        accountId: src?.id ?? wireSrcId,
+        description: `External wire — ${beneficiaryName || "Beneficiary"}`,
+        amount: amt,
+        reason: !src ? "Invalid account number or routing details" : "Insufficient funds",
+        details: !src ? "Unable to locate the selected source account." : `Transfer attempted above available balance for ${src.name}.`,
+      });
       notify("Please enter an amount within your operating balance.");
       return;
     }
@@ -625,6 +682,13 @@ export default function BusinessDashboard({
     const src = operatingAccounts.find((a) => a.currency === "CAD") ?? operatingAccounts[0];
     const payee = profile.payees.find((p) => p.id === taxPayeeId) ?? profile.payees[0];
     if (!src || !payee || !amt || amt <= 0 || amt > src.balance) {
+      recordFailedTransfer({
+        accountId: src?.id ?? operatingAccounts[0]?.id ?? profile.accounts[0]?.id ?? "",
+        description: `Tax remittance — ${payee?.name ?? "Government remittance"}`,
+        amount: amt,
+        reason: !src ? "Invalid account number or routing details" : "Insufficient funds",
+        details: !src ? "Unable to locate the selected remittance account." : `Remittance attempted above available balance for ${src.name}.`,
+      });
       notify("Verify remittance amount and operating balance.");
       return;
     }
@@ -686,10 +750,24 @@ export default function BusinessDashboard({
     const amt = Number(fxAmount);
     const from = profile.accounts.find((a) => a.id === fxFromId);
     if (!from || !amt || amt <= 0) {
+      recordFailedTransfer({
+        accountId: from?.id ?? fxFromId,
+        description: `FX conversion — ${from?.name ?? "selected source account"}`,
+        amount: amt,
+        reason: "Invalid account number or routing details",
+        details: "The FX request was missing a valid source amount or account.",
+      });
       notify("Enter an amount to convert.");
       return;
     }
     if (from.balance < amt) {
+      recordFailedTransfer({
+        accountId: from.id,
+        description: `FX conversion — ${from.name}`,
+        amount: amt,
+        reason: "Insufficient funds",
+        details: `FX conversion attempted above available balance for ${from.name}.`,
+      });
       notify(`Insufficient funds in ${from.name}.`);
       return;
     }
@@ -779,6 +857,13 @@ export default function BusinessDashboard({
     const src = profile.accounts.find((a) => a.id === trFromId);
     const dst = profile.accounts.find((a) => a.id === trToId);
     if (!src || !dst || src.id === dst.id || !amt || amt <= 0 || src.balance < amt) {
+      recordFailedTransfer({
+        accountId: src?.id ?? trFromId,
+        description: src && dst && src.id !== dst.id ? `Treasury transfer — ${src.name} to ${dst.name}` : "Treasury transfer — invalid configuration",
+        amount: amt,
+        reason: src && src.balance < amt ? "Insufficient funds" : "Invalid account number or routing details",
+        details: src && dst && src.id !== dst.id ? `Treasury sweep attempted above available balance for ${src.name}.` : "The treasury transfer source or destination was not valid.",
+      });
       notify("Select two distinct accounts and a valid amount.");
       return;
     }
@@ -849,6 +934,242 @@ export default function BusinessDashboard({
         setPendingTransfer(null);
       },
     });
+  };
+
+  const handleBusinessCardTransfer = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (profile.status === "frozen" || !!profile.transfersPaused) {
+      recordFailedTransfer({
+        accountId: cardFundingSourceId || operatingAccounts[0]?.id || profile.accounts[0]?.id || "",
+        description: `Card ${cardTransferType === "from-card" ? "add funds from card" : cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
+        amount: Number(businessCardAmt) || 0,
+        reason: profile.status === "frozen" ? "Account is frozen or restricted" : "User transfer paused by administration",
+        details: profile.transferPauseReason ?? "Card transfer processing is blocked pending review.",
+      });
+      notify(
+        profile.status === "frozen"
+          ? "This account is on hold and cannot send transfers."
+          : "Outgoing transfers are paused for this account."
+      );
+      return;
+    }
+
+    const amt = Number(businessCardAmt);
+    const card = profile.cards.find((c) => c.id === businessCardId) ?? profile.cards[0];
+    const targetAccount = profile.accounts.find((a) => a.id === cardFundingSourceId) ?? profile.accounts[0] ?? operatingAccounts[0];
+
+    if (!card) {
+      recordFailedTransfer({
+        accountId: cardFundingSourceId || profile.accounts[0]?.id || "",
+        description: `Card ${cardTransferType === "from-card" ? "add funds from card" : cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
+        amount: amt,
+        reason: "Invalid account number or routing details",
+        details: "No valid corporate card was selected for this transfer.",
+      });
+      notify("Select a valid corporate card.");
+      return;
+    }
+
+    if (!targetAccount) {
+      recordFailedTransfer({
+        accountId: profile.accounts[0]?.id ?? "",
+        description: `Card ${cardTransferType === "from-card" ? "add funds from card" : cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
+        amount: amt,
+        reason: "Invalid account number or routing details",
+        details: "No valid account was selected for the card transfer.",
+      });
+      notify("Choose an account for this transfer.");
+      return;
+    }
+
+    if (!amt || amt <= 0) {
+      recordFailedTransfer({
+        accountId: targetAccount.id,
+        description: `Card ${cardTransferType === "from-card" ? "add funds from card" : cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
+        amount: 0,
+        reason: "Transfer exceeds daily or per-payment limit",
+        details: "The transfer amount must be greater than zero.",
+      });
+      notify("Enter a valid amount to transfer.");
+      return;
+    }
+
+    const memoClean = businessCardMemo.trim();
+
+    if (cardTransferType === "from-card") {
+      const updatedTargetBalance = Math.round((targetAccount.balance + amt) * 100) / 100;
+      const label = "Card funds added";
+
+      runAnimatedTx(
+        {
+          kind: "transfer",
+          amount: amt,
+          currency: targetAccount.currency,
+          fromLabel: `${card.label} (Card)`,
+          toLabel: targetAccount.name,
+          memo: memoClean || undefined,
+          reference: makeRef("CRD"),
+          timestamp: `${todayIso()} · ${nowStamp()}`,
+          updatedBalanceLabel: `${targetAccount.name}: ${formatMoney(updatedTargetBalance, targetAccount.currency)}`,
+        },
+        () => {
+          const txId = `b-card-credit-${Date.now()}`;
+          onUpdateProfile((prev) => ({
+            ...prev,
+            accounts: prev.accounts.map((account) =>
+              account.id === targetAccount.id ? { ...account, balance: updatedTargetBalance } : account
+            ),
+            transactions: [
+              {
+                id: txId,
+                accountId: targetAccount.id,
+                date: todayIso(),
+                description: `${label} to ${targetAccount.name}${memoClean ? ` — ${memoClean}` : ""}`,
+                category: "Transfer",
+                amount: amt,
+                status: "Posted",
+                reference: `CRD-${randomDigits(6)}`,
+              },
+              ...prev.transactions,
+            ],
+          }));
+          setBusinessCardMemo("");
+          return [txId];
+        }
+      );
+      return;
+    }
+
+    const src = targetAccount;
+    if ((src.category === "chequing" || src.category === "savings") && src.balance < amt) {
+      recordFailedTransfer({
+        accountId: src.id,
+        description: `Card ${cardTransferType === "from-card" ? "add funds from card" : cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
+        amount: amt,
+        reason: "Insufficient funds",
+        details: `Card transfer attempted above available balance for ${src.name}.`,
+      });
+      notify(`Insufficient available funds in ${src.name}.`);
+      return;
+    }
+
+    const updatedSrcBalance = Math.round((src.balance - amt) * 100) / 100;
+    const label = cardTransferType === "cash" ? "Cash advance" : "Card transfer";
+
+    runAnimatedTx(
+      {
+        kind: "transfer",
+        amount: amt,
+        currency: src.currency,
+        fromLabel: src.name,
+        toLabel: `${card.label} (Card)`,
+        memo: memoClean || undefined,
+        reference: makeRef("CRD"),
+        timestamp: `${todayIso()} · ${nowStamp()}`,
+        updatedBalanceLabel: `${src.name}: ${formatMoney(updatedSrcBalance, src.currency)}`,
+      },
+      () => {
+        const txId = `b-card-out-${Date.now()}`;
+        onUpdateProfile((prev) => ({
+          ...prev,
+          accounts: prev.accounts.map((account) =>
+            account.id === src.id ? { ...account, balance: updatedSrcBalance } : account
+          ),
+          transactions: [
+            {
+              id: txId,
+              accountId: src.id,
+              date: todayIso(),
+              description: `${label} to ${card.label}${memoClean ? ` — ${memoClean}` : ""}`,
+              category: "Transfer",
+              amount: -amt,
+              status: "Posted",
+              reference: `CRD-${randomDigits(6)}`,
+            },
+            ...prev.transactions,
+          ],
+        }));
+        setBusinessCardMemo("");
+        return [txId];
+      }
+    );
+  };
+
+  const addBusinessCard = (e?: React.FormEvent) => {
+    e?.preventDefault();
+
+    const normalizedCardNumber = newCardNumber.replace(/\D/g, "");
+    const normalizedLast4 = normalizedCardNumber.slice(-4);
+    const fallbackAccountId = operatingAccounts[0]?.id ?? profile.accounts[0]?.id ?? "";
+    const linkedAccountId = newCardLinkedAccountId || fallbackAccountId;
+    const billingAddress = newCardBillingAddress.trim();
+
+    if (!normalizedCardNumber || normalizedCardNumber.length < 12) {
+      notify("Enter the full card number to add the card.");
+      return;
+    }
+
+    if (!billingAddress) {
+      notify("Add the billing address linked to this card.");
+      return;
+    }
+
+    if (!linkedAccountId) {
+      notify("Choose the account this card should be linked to.");
+      return;
+    }
+
+    const issuedAt = todayIso();
+    const nextCard = {
+      id: `biz-card-${Date.now()}`,
+      label: newCardLabel.trim() || "Swiftdevice Business Mastercard",
+      network: "Mastercard" as const,
+      number: normalizedCardNumber,
+      last4: normalizedLast4,
+      expiry: newCardExpiry || "07/29",
+      cvv: newCardCvv || "000",
+      cardholderName: (newCardHolderName || profile.fullName).toUpperCase(),
+      billingAddress,
+      linkedAccountId,
+      locked: false,
+      contactless: true,
+      international: true,
+      onlinePurchases: true,
+      rewardsPoints: 0,
+      cashbackRate: "1.25% on corporate spend",
+      accent: "business" as const,
+      status: "active" as const,
+      issuedAt,
+    };
+
+    onUpdateProfile((prev) => ({
+      ...prev,
+      cards: [nextCard, ...prev.cards],
+    }));
+    setBusinessCardId(nextCard.id);
+    setCardFundingSourceId(linkedAccountId || cardFundingSourceId);
+    setIsAddingCard(false);
+    setNewCardLabel("Swiftdevice Business Mastercard");
+    setNewCardHolderName(profile.fullName.toUpperCase());
+    setNewCardNumber("");
+    setNewCardExpiry("07/29");
+    setNewCardCvv("");
+    setNewCardBillingAddress(profile.address ?? "");
+    setNewCardLinkedAccountId(fallbackAccountId || "");
+    notify("New corporate card was added to the account.");
+  };
+
+  const updateCardLink = (cardId: string, updates: Partial<Pick<BankCard, "cardholderName" | "expiry" | "billingAddress" | "linkedAccountId">>) => {
+    onUpdateProfile((prev) => ({
+      ...prev,
+      cards: prev.cards.map((card) => (card.id === cardId ? { ...card, ...updates } : card)),
+    }));
+  };
+
+  const linkCardToAccount = (cardId: string, accountId: string) => {
+    updateCardLink(cardId, { linkedAccountId: accountId });
+    notify("Corporate card linkage updated.");
   };
 
   const toggleCardSetting = (
@@ -2006,6 +2327,7 @@ export default function BusinessDashboard({
               {(
                 [
                   ["wire", "Domestic & international wire"],
+                  ["card", "Card transfer"],
                   ["tax", "Government tax remittance (CRA / RQ)"],
                   ["treasury", "Inter-account treasury sweep"],
                   ["fx", "Currency conversion"],
@@ -2070,6 +2392,137 @@ export default function BusinessDashboard({
                   <button type="button" onClick={() => setPendingTransfer(null)} className="nbc-btn nbc-btn-ghost">
                     Edit details
                   </button>
+                </div>
+              </div>
+            )}
+
+            {!pendingTransfer && wireMode === "card" && (
+              <div className="max-w-[760px] rounded-[6px] border border-[#e5e2da] bg-[#f8f6f1] p-6">
+                <div className="mb-4 flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-[20px] font-bold text-nbc-navy">Corporate card transfer</h2>
+                    <p className="mt-1 text-[13px] text-[#565656]">
+                      Move funds to or from a linked operating account for card top-ups and cash advances.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-[#faf3f3] px-2.5 py-1 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-nbc-red">
+                    Linked card
+                  </span>
+                </div>
+                <div className="rounded-[6px] border border-[#e5e2da] bg-white p-4">
+                  <div className="scroll-tabs flex flex-wrap gap-2">
+                    {([
+                      ["transfer", "Transfer to card"],
+                      ["cash", "Cash advance"],
+                      ["from-card", "Add funds from card"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setCardTransferType(value)}
+                        className={`rounded-full border px-3 py-2 text-[12.5px] font-semibold transition ${
+                          cardTransferType === value
+                            ? "border-nbc-red bg-[#fff2f2] text-nbc-red"
+                            : "border-[#d8d1c2] bg-white text-[#454545] hover:border-[#b7b0a3]"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <form onSubmit={handleBusinessCardTransfer} className="mt-4 space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label htmlFor="biz-card-transfer-select" className="block text-[13px] font-semibold text-[#121212]">
+                          Corporate card
+                        </label>
+                        <select
+                          id="biz-card-transfer-select"
+                          value={businessCardId}
+                          onChange={(e) => setBusinessCardId(e.target.value)}
+                          className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                        >
+                          {profile.cards.map((card) => (
+                            <option key={card.id} value={card.id}>
+                              {card.label} · {card.last4}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label htmlFor="biz-card-transfer-account" className="block text-[13px] font-semibold text-[#121212]">
+                          {cardTransferType === "from-card" ? "Destination account" : "Source account"}
+                        </label>
+                        <select
+                          id="biz-card-transfer-account"
+                          value={cardFundingSourceId}
+                          onChange={(e) => setCardFundingSourceId(e.target.value)}
+                          className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                        >
+                          {profile.accounts.map((account) => (
+                            <option key={account.id} value={account.id}>
+                              {account.name} ({account.currency}) · {formatMoney(account.balance, account.currency)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div>
+                        <label htmlFor="biz-card-transfer-amount" className="block text-[13px] font-semibold text-[#121212]">
+                          Amount
+                        </label>
+                        <input
+                          id="biz-card-transfer-amount"
+                          type="number"
+                          min="1"
+                          step="0.01"
+                          value={businessCardAmt}
+                          onChange={(e) => setBusinessCardAmt(e.target.value)}
+                          className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[15px] font-semibold tabular-nums text-[#121212]"
+                        />
+                      </div>
+                      <div className="flex items-end">
+                        <div className="w-full rounded-[6px] border border-dashed border-[#d8d1c2] bg-white px-3 py-3 text-[13px] text-[#565656]">
+                          <span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#565656]">Linked account</span>
+                          <span className="mt-1 block font-semibold text-nbc-navy">
+                            {(() => {
+                              const selectedCard = profile.cards.find((card) => card.id === businessCardId) ?? profile.cards[0];
+                              const linked = selectedCard ? profile.accounts.find((a) => a.id === selectedCard.linkedAccountId) : undefined;
+                              return linked ? `${linked.name} · ${formatMoney(linked.balance, linked.currency)}` : "No linked account";
+                            })()}
+                          </span>
+                          <span className="mt-2 block text-[11.5px] text-[#565656]">
+                            Selected: {(() => {
+                              const selected = profile.accounts.find((a) => a.id === cardFundingSourceId) ?? profile.accounts[0];
+                              return selected ? `${selected.name} · ${formatMoney(selected.balance, selected.currency)}` : "No account selected";
+                            })()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label htmlFor="biz-card-transfer-memo" className="block text-[13px] font-semibold text-[#121212]">
+                        Optional memo
+                      </label>
+                      <input
+                        id="biz-card-transfer-memo"
+                        type="text"
+                        value={businessCardMemo}
+                        onChange={(e) => setBusinessCardMemo(e.target.value)}
+                        placeholder="Business travel, software subscription, vendor payment"
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                      />
+                    </div>
+
+                    <button type="submit" className="nbc-btn nbc-btn-primary">
+                      {cardTransferType === "from-card" ? "Add funds from card" : cardTransferType === "cash" ? "Submit cash advance" : "Transfer to card"}
+                    </button>
+                  </form>
                 </div>
               </div>
             )}
@@ -2442,7 +2895,7 @@ export default function BusinessDashboard({
 
         {/* TAB 5: CORPORATE CARDS */}
         {tab === "cards" && (
-          <div className="space-y-5">
+          <div className="space-y-6">
             <div className="flex items-center gap-3">
               <img src={pictoCarteCreditRed} alt="" aria-hidden className="h-8 w-8 object-contain" />
               <div>
@@ -2453,44 +2906,347 @@ export default function BusinessDashboard({
               </div>
             </div>
 
-            <div className="grid gap-6 md:grid-cols-2">
-              {profile.cards.map((card) => (
-                <div
-                  key={card.id}
-                  className="mx-auto w-full max-w-[400px] rounded-[6px] border border-[#e5e2da] bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-                >
-                  <BankCardVisual card={card} holderName={profile.fullName} />
-                  <div className="mt-5 divide-y divide-[#efefef] text-[14px]">
-                    {(
-                      [
-                        ["locked", "Lock corporate card", card.locked],
-                        ["contactless", "Contactless purchases", card.contactless],
-                        ["international", "Foreign / travel charges", card.international],
-                        ["onlinePurchases", "Online & software subscriptions", card.onlinePurchases],
-                      ] as const
-                    ).map(([field, label, active]) => (
-                      <div key={field} className="flex items-center justify-between py-3">
-                        <span className="text-[#333333]">{label}</span>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={active}
-                          onClick={() => toggleCardSetting(card.id, field)}
-                          className={`relative h-6 w-11 rounded-full transition ${
-                            active ? "bg-nbc-red" : "bg-[#cfcfcf]"
-                          }`}
-                        >
-                          <span
-                            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
-                              active ? "left-5" : "left-0.5"
-                            }`}
-                          />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
+            <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+              <div className="flex items-center justify-between gap-3 border-b border-[#ece8df] pb-4">
+                <div>
+                  <h3 className="text-[18px] font-bold text-nbc-navy">Card funding and transfers</h3>
+                  <p className="mt-1 text-[13px] text-[#565656]">
+                    Move funds to or from a linked operating account and keep card cash flow under control.
+                  </p>
                 </div>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setIsAddingCard((prev) => !prev)}
+                  className="rounded-full border border-[#c9c3b6] bg-[#f8f6f1] px-3 py-2 text-[12.5px] font-semibold text-nbc-navy transition hover:bg-[#efeae1]"
+                >
+                  {isAddingCard ? "Cancel" : "+ Add another card"}
+                </button>
+              </div>
+
+              {isAddingCard && (
+                <form onSubmit={addBusinessCard} className="mt-4 rounded-[6px] border border-[#e5e2da] bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <h4 className="text-[16px] font-bold text-nbc-navy">Add a corporate card</h4>
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#565656]">New card</span>
+                  </div>
+
+                  <p className="mb-4 text-[12.5px] text-[#565656]">
+                    Enter the full card details below and link the card to the operating account it should use for transfers and funding.
+                  </p>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label htmlFor="new-card-label" className="block text-[13px] font-semibold text-[#121212]">Card label</label>
+                      <input
+                        id="new-card-label"
+                        type="text"
+                        value={newCardLabel}
+                        onChange={(e) => setNewCardLabel(e.target.value)}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="new-card-holder" className="block text-[13px] font-semibold text-[#121212]">Cardholder name</label>
+                      <input
+                        id="new-card-holder"
+                        type="text"
+                        value={newCardHolderName}
+                        onChange={(e) => setNewCardHolderName(e.target.value)}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="new-card-number" className="block text-[13px] font-semibold text-[#121212]">Card number</label>
+                      <input
+                        id="new-card-number"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={19}
+                        value={newCardNumber}
+                        onChange={(e) => setNewCardNumber(e.target.value.replace(/\D/g, "").slice(0, 19))}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="new-card-expiry" className="block text-[13px] font-semibold text-[#121212]">Expiry</label>
+                      <input
+                        id="new-card-expiry"
+                        type="text"
+                        value={newCardExpiry}
+                        onChange={(e) => setNewCardExpiry(e.target.value)}
+                        placeholder="07/29"
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="new-card-cvv" className="block text-[13px] font-semibold text-[#121212]">CVV</label>
+                      <input
+                        id="new-card-cvv"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={4}
+                        value={newCardCvv}
+                        onChange={(e) => setNewCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label htmlFor="new-card-address" className="block text-[13px] font-semibold text-[#121212]">Billing address linked to this card</label>
+                      <input
+                        id="new-card-address"
+                        type="text"
+                        value={newCardBillingAddress}
+                        onChange={(e) => setNewCardBillingAddress(e.target.value)}
+                        placeholder="1200 Rue Sainte-Catherine, Montreal, QC H3B 4L2"
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                      />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label htmlFor="new-card-linked-account" className="block text-[13px] font-semibold text-[#121212]">Link to account</label>
+                      <select
+                        id="new-card-linked-account"
+                        value={newCardLinkedAccountId}
+                        onChange={(e) => setNewCardLinkedAccountId(e.target.value)}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                      >
+                        {profile.accounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name} ({account.currency})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button type="submit" className="nbc-btn nbc-btn-primary">Add card</button>
+                    <button type="button" onClick={() => setIsAddingCard(false)} className="nbc-btn nbc-btn-ghost">Cancel</button>
+                  </div>
+                </form>
+              )}
+
+              <div className="mt-4 rounded-[6px] border border-[#e5e2da] bg-[#f8f6f1] p-4">
+                <div className="scroll-tabs flex flex-wrap gap-2">
+                  {([
+                    ["transfer", "Transfer to card"],
+                    ["cash", "Cash advance"],
+                    ["from-card", "Add funds from card"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setCardTransferType(value)}
+                      className={`rounded-full border px-3 py-2 text-[12.5px] font-semibold transition ${
+                        cardTransferType === value
+                          ? "border-nbc-red bg-[#fff2f2] text-nbc-red"
+                          : "border-[#d8d1c2] bg-white text-[#454545] hover:border-[#b7b0a3]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <form onSubmit={handleBusinessCardTransfer} className="mt-4 space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label htmlFor="biz-card-select" className="block text-[13px] font-semibold text-[#121212]">
+                        Corporate card
+                      </label>
+                      <select
+                        id="biz-card-select"
+                        value={businessCardId}
+                        onChange={(e) => setBusinessCardId(e.target.value)}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                      >
+                        {profile.cards.map((card) => (
+                          <option key={card.id} value={card.id}>
+                            {card.label} · {card.last4}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label htmlFor="biz-card-account" className="block text-[13px] font-semibold text-[#121212]">
+                        {cardTransferType === "from-card" ? "Destination account" : "Source account"}
+                      </label>
+                      <select
+                        id="biz-card-account"
+                        value={cardFundingSourceId}
+                        onChange={(e) => setCardFundingSourceId(e.target.value)}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                      >
+                        {operatingAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name} ({formatMoney(account.balance, account.currency)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label htmlFor="biz-card-amount" className="block text-[13px] font-semibold text-[#121212]">
+                        Amount
+                      </label>
+                      <input
+                        id="biz-card-amount"
+                        type="number"
+                        min="1"
+                        step="0.01"
+                        value={businessCardAmt}
+                        onChange={(e) => setBusinessCardAmt(e.target.value)}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[15px] font-semibold tabular-nums text-[#121212]"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <div className="w-full rounded-[6px] border border-dashed border-[#d8d1c2] bg-white px-3 py-3 text-[13px] text-[#565656]">
+                        <span className="block text-[11px] font-semibold uppercase tracking-[0.08em] text-[#565656]">Linked account</span>
+                        <span className="mt-1 block font-semibold text-nbc-navy">
+                          {(() => {
+                            const selectedCard = profile.cards.find((card) => card.id === businessCardId) ?? profile.cards[0];
+                            const linked = selectedCard ? profile.accounts.find((a) => a.id === selectedCard.linkedAccountId) : undefined;
+                            return linked ? `${linked.name} · ${formatMoney(linked.balance, linked.currency)}` : "No linked account";
+                          })()}
+                        </span>
+                        <span className="mt-2 block text-[11.5px] text-[#565656]">
+                          Selected: {(() => {
+                            const selected = profile.accounts.find((a) => a.id === cardFundingSourceId) ?? profile.accounts[0];
+                            return selected ? `${selected.name} · ${formatMoney(selected.balance, selected.currency)}` : "No account selected";
+                          })()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="biz-card-memo" className="block text-[13px] font-semibold text-[#121212]">
+                      Optional memo
+                    </label>
+                    <input
+                      id="biz-card-memo"
+                      type="text"
+                      value={businessCardMemo}
+                      onChange={(e) => setBusinessCardMemo(e.target.value)}
+                      placeholder="Business travel, software subscription, vendor payment"
+                      className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] px-3 py-2.5 text-[14px] text-[#121212]"
+                    />
+                  </div>
+
+                  <button type="submit" className="nbc-btn nbc-btn-primary">
+                    {cardTransferType === "from-card" ? "Add funds from card" : cardTransferType === "cash" ? "Submit cash advance" : "Transfer to card"}
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2">
+              {profile.cards.map((card) => {
+                const linked = profile.accounts.find((account) => account.id === card.linkedAccountId);
+                return (
+                  <div
+                    key={card.id}
+                    className="mx-auto w-full max-w-[400px] rounded-[6px] border border-[#e5e2da] bg-white p-6 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+                  >
+                    <BankCardVisual card={card} holderName={profile.fullName} />
+                    <div className="mt-5 space-y-3 text-[14px]">
+                      <div className="rounded-[6px] border border-[#e5e2da] bg-[#faf8f3] p-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#565656]">Card details</p>
+                        <div className="mt-2 space-y-2 text-[12px] text-[#333333]">
+                          <label className="block">
+                            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.06em] text-[#565656]">Cardholder</span>
+                            <input
+                              value={card.cardholderName || profile.fullName}
+                              onChange={(e) => updateCardLink(card.id, { cardholderName: e.target.value })}
+                              className="w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2 text-[13px] text-[#121212]"
+                            />
+                          </label>
+                          <div>
+                            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.06em] text-[#565656]">Number</span>
+                            <p className="rounded-[6px] border border-[#e5e2da] bg-white px-3 py-2 text-[13px] text-[#121212]">
+                              {card.number ? card.number.replace(/(.{4})/g, "$1 ").trim() : `•••• •••• •••• ${card.last4}`}
+                            </p>
+                          </div>
+                          <label className="block">
+                            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.06em] text-[#565656]">Expiry</span>
+                            <input
+                              value={card.expiry}
+                              onChange={(e) => updateCardLink(card.id, { expiry: e.target.value })}
+                              className="w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2 text-[13px] text-[#121212]"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.06em] text-[#565656]">Billing address</span>
+                            <input
+                              value={card.billingAddress || ""}
+                              onChange={(e) => updateCardLink(card.id, { billingAddress: e.target.value })}
+                              placeholder="Billing address linked to this card"
+                              className="w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2 text-[13px] text-[#121212]"
+                            />
+                          </label>
+                        </div>
+                      </div>
+
+                      <div className="rounded-[6px] border border-[#e5e2da] bg-[#faf8f3] p-3">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#565656]">Linked account</p>
+                        <div className="mt-2">
+                          <label htmlFor={`card-link-${card.id}`} className="sr-only">
+                            Link {card.label} to an account
+                          </label>
+                          <select
+                            id={`card-link-${card.id}`}
+                            value={card.linkedAccountId ?? ""}
+                            onChange={(e) => linkCardToAccount(card.id, e.target.value)}
+                            className="w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[13px] text-nbc-navy"
+                          >
+                            <option value="">Unassigned</option>
+                            {profile.accounts.map((account) => (
+                              <option key={account.id} value={account.id}>
+                                {account.name} ({account.currency})
+                              </option>
+                            ))}
+                          </select>
+                          <p className="mt-2 text-[12px] text-[#565656]">
+                            {linked ? `Currently linked to ${linked.name}` : "No linked operating account selected"}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="divide-y divide-[#efefef]">
+                        {(
+                          [
+                            ["locked", "Lock corporate card", card.locked],
+                            ["contactless", "Contactless purchases", card.contactless],
+                            ["international", "Foreign / travel charges", card.international],
+                            ["onlinePurchases", "Online & software subscriptions", card.onlinePurchases],
+                          ] as const
+                        ).map(([field, label, active]) => (
+                          <div key={field} className="flex items-center justify-between py-3">
+                            <span className="text-[#333333]">{label}</span>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={active}
+                              onClick={() => toggleCardSetting(card.id, field)}
+                              className={`relative h-6 w-11 rounded-full transition ${
+                                active ? "bg-nbc-red" : "bg-[#cfcfcf]"
+                              }`}
+                            >
+                              <span
+                                className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
+                                  active ? "left-5" : "left-0.5"
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -2740,13 +3496,17 @@ export default function BusinessDashboard({
                               <div className="flex-none pt-0.5 text-right">
                                 <span
                                   className={`block whitespace-nowrap text-[13px] font-semibold tabular-nums ${
-                                    tx.amount >= 0 ? "text-[#017a33]" : "text-[#121212]"
+                                    tx.status === "Failed"
+                                      ? "text-[#b42318]"
+                                      : tx.amount >= 0
+                                        ? "text-[#017a33]"
+                                        : "text-[#121212]"
                                   }`}
                                 >
-                                  {txDisplayAmount(tx.amount, acc?.currency ?? "CAD")}
+                                  {tx.status === "Failed" ? "Failed" : txDisplayAmount(tx.amount, acc?.currency ?? "CAD")}
                                 </span>
                                 <span className="block text-[10.5px] text-[#777]">
-                                  {tx.amount >= 0 ? "Credit" : "Debit"}
+                                  {tx.status === "Failed" ? "Review" : tx.amount >= 0 ? "Credit" : "Debit"}
                                 </span>
                               </div>
                             </li>
@@ -2854,8 +3614,32 @@ export default function BusinessDashboard({
               </div>
               <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
                 <dt className="text-[#565656]">Status</dt>
-                <dd className="font-semibold text-[#121212]">{selectedTx.status ?? "Posted"}</dd>
+                <dd
+                  className={`font-semibold ${
+                    selectedTx.status === "Failed" ? "text-[#b42318]" : "text-[#121212]"
+                  }`}
+                >
+                  {selectedTx.status ?? "Posted"}
+                </dd>
               </div>
+              {selectedTx.status === "Failed" && (
+                <>
+                  <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
+                    <dt className="text-[#565656]">Failure reason</dt>
+                    <dd className="max-w-[60%] text-right font-semibold text-[#b42318]">
+                      {selectedTx.failureReason ?? "Other"}
+                    </dd>
+                  </div>
+                  {selectedTx.failureDetails && (
+                    <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
+                      <dt className="text-[#565656]">Details</dt>
+                      <dd className="max-w-[60%] text-right font-medium text-[#121212]">
+                        {selectedTx.failureDetails}
+                      </dd>
+                    </div>
+                  )}
+                </>
+              )}
               <div className="flex items-center justify-between gap-4 border-b border-[#efefef] pb-2">
                 <dt className="text-[#565656]">Type</dt>
                 <dd className="font-semibold text-[#121212]">{selectedTx.amount >= 0 ? "Credit" : "Debit"}</dd>

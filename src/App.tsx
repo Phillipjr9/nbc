@@ -702,14 +702,21 @@ export default function App() {
     logDetail?: string,
     severity: AuditLogEntry["severity"] = "info"
   ) => {
+    const normalizeProfile = (profile: BankUserProfile): BankUserProfile => ({
+      ...profile,
+      cards: Array.isArray(profile.cards)
+        ? profile.cards.filter((card, index, list) => list.findIndex((entry) => entry.id === card.id) === index)
+        : [],
+    });
+
     if (key === "personal" || key === "business" || key === "wealth") {
       setProfiles((prev) => ({
         ...prev,
-        [key]: updater(prev[key]),
+        [key]: normalizeProfile(updater(prev[key])),
       }));
     } else {
       setCustomProfiles((prev) =>
-        prev.map((cp) => (cp.email.toLowerCase() === key.toLowerCase() ? updater(cp) : cp))
+        prev.map((cp) => (cp.email.toLowerCase() === key.toLowerCase() ? normalizeProfile(updater(cp)) : cp))
       );
     }
     if (logAction && logDetail) {
@@ -971,6 +978,22 @@ export default function App() {
   const isDedicatedAdminDashboard = route.kind === "admin" && adminAuth && Boolean(adminIdentity);
   const isDedicatedPersonalDashboard = route.kind === "personal-dashboard" && Boolean(personalPageProfile);
   const isDedicatedBusinessDashboard = route.kind === "business-dashboard" && Boolean(businessPageProfile);
+  const businessInitialTab: "treasury" | "payroll" | "invoices" | "wires" | "cards" | "ledger" | "settings" =
+    route.kind === "business-dashboard"
+      ? route.tab === "payroll"
+        ? "payroll"
+        : route.tab === "invoices"
+          ? "invoices"
+          : route.tab === "wires"
+            ? "wires"
+            : route.tab === "cards"
+              ? "cards"
+              : route.tab === "ledger"
+                ? "ledger"
+                : route.tab === "settings"
+                  ? "settings"
+                  : "treasury"
+      : "treasury";
   const isAuthRoute =
     route.kind === "login" || route.kind === "admin-login" || route.kind === "signup";
 
@@ -1042,7 +1065,7 @@ export default function App() {
       ) : isDedicatedBusinessDashboard && businessPageProfile ? (
         <BusinessDashboard
           profile={businessPageProfile}
-          initialTab="treasury"
+          initialTab={businessInitialTab}
           onUpdateProfile={handleUpdateActiveProfile}
           onGoPublicSite={() => navigate({ kind: "home" })}
           onGoHelp={() => navigate({ kind: "support", section: "appointment" })}

@@ -10,8 +10,10 @@ export function routeToHash(route: PageRoute): string {
       return route.segment === "business" ? "#/signup/business" : "#/signup";
     case "personal-dashboard":
       return "#/dashboard";
-    case "business-dashboard":
-      return route.tab === "cash-position" ? "#/dashboard/business?tab=cash-position" : "#/dashboard/business";
+    case "business-dashboard": {
+      const tab = route.tab ?? "cash-position";
+      return tab === "cash-position" ? "#/dashboard/business?tab=cash-position" : `#/dashboard/business?tab=${tab}`;
+    }
     case "admin-login":
       return "#/admin-login";
     case "admin":
@@ -33,7 +35,11 @@ export function hashToRoute(hash: string): PageRoute {
 
   if (pathPart === "dashboard" || pathPart === "dashboard/personal") return { kind: "personal-dashboard" };
   if (pathPart === "dashboard/business") {
-    return params.get("tab") === "cash-position" ? { kind: "business-dashboard", tab: "cash-position" } : { kind: "business-dashboard" };
+    const tab = params.get("tab");
+    const validTabs = ["cash-position", "payroll", "invoices", "wires", "cards", "ledger", "settings"] as const;
+    return tab && validTabs.includes(tab as (typeof validTabs)[number])
+      ? { kind: "business-dashboard", tab: tab as (typeof validTabs)[number] }
+      : { kind: "business-dashboard", tab: "cash-position" };
   }
   if (clean === "personal-banking") return { kind: "personal-dashboard" };
   if (clean === "business-banking") return { kind: "business-dashboard" };

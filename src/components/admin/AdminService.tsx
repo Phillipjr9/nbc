@@ -20,7 +20,10 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
   const entry = ops.users.find((u) => u.key === targetKey) ?? ops.users.find((u) => u.key === selectedKey) ?? ops.users[0];
   const [templateIdx, setTemplateIdx] = useState(0);
   const [label, setLabel] = useState(CARD_TEMPLATES[0].label);
-  const [cardLimit, setCardLimit] = useState(String(CARD_TEMPLATES[0].limit));
+  const [cardNumber, setCardNumber] = useState(randomDigits(16));
+  const [cardExpiry, setCardExpiry] = useState("05/30");
+  const [cardCvv, setCardCvv] = useState(randomDigits(3));
+  const [billingAddress, setBillingAddress] = useState(entry?.profile.address ?? "");
   const [points, setPoints] = useState(String(CARD_TEMPLATES[0].points));
   const [filterKey, setFilterKey] = useState("all");
 
@@ -38,15 +41,18 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
     const template = CARD_TEMPLATES[templateIdx];
     const linked =
       entry.profile.accounts.find((a) => a.category === "credit") ?? entry.profile.accounts[0];
+    const fullCardNumber = cardNumber.replace(/\D/g, "").slice(0, 19);
+    const normalizedLast4 = fullCardNumber.slice(-4) || randomDigits(4);
     const card: BankCard = {
       id: newId("card"),
       label: label.trim() || template.label,
       network: template.network,
-      last4: randomDigits(4),
-      expiry: "05/30",
-      cvv: randomDigits(3),
+      number: fullCardNumber,
+      last4: normalizedLast4,
+      expiry: cardExpiry || "05/30",
+      cvv: cardCvv || randomDigits(3),
       cardholderName: entry.profile.fullName.toUpperCase().slice(0, 28),
-      monthlyLimit: round2(Number(cardLimit) || template.limit),
+      billingAddress: billingAddress.trim() || entry.profile.address || "Not provided",
       linkedAccountId: linked?.id ?? "",
       locked: false,
       contactless: true,
@@ -65,7 +71,7 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
       <div>
         <h2 className="text-[22px] font-bold text-nbc-navy sm:text-[24px]">Card management</h2>
         <p className="mt-0.5 text-[13.5px] text-[#565656]">
-          Issue cards, set spend limits, grant rewards points, freeze or revoke.
+          Issue cards, grant rewards points, freeze or revoke.
         </p>
       </div>
 
@@ -85,7 +91,6 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
               const i = Number(e.target.value);
               setTemplateIdx(i);
               setLabel(CARD_TEMPLATES[i].label);
-              setCardLimit(String(CARD_TEMPLATES[i].limit));
               setPoints(String(CARD_TEMPLATES[i].points));
             }}
           >
@@ -95,7 +100,10 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
           </select>
         </Field>
         <Field label="Cardholder label"><input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} /></Field>
-        <Field label="Monthly limit"><input className={inputCls} type="number" min="0" value={cardLimit} onChange={(e) => setCardLimit(e.target.value)} /></Field>
+        <Field label="Card number"><input className={inputCls} value={cardNumber} onChange={(e) => setCardNumber(e.target.value.replace(/\D/g, "").slice(0, 19))} /></Field>
+        <Field label="Expiry"><input className={inputCls} value={cardExpiry} onChange={(e) => setCardExpiry(e.target.value)} placeholder="05/30" /></Field>
+        <Field label="CVV"><input className={inputCls} value={cardCvv} onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, "").slice(0, 4))} /></Field>
+        <Field label="Billing address"><input className={inputCls} value={billingAddress ?? ""} onChange={(e) => setBillingAddress(e.target.value)} placeholder="1200 Rue Sainte-Catherine" /></Field>
         <Field label="Opening points"><input className={inputCls} type="number" min="0" value={points} onChange={(e) => setPoints(e.target.value)} /></Field>
         <div className="flex items-end">
           <button type="submit" className="w-full rounded-[6px] bg-nbc-red py-2.5 text-[13px] font-semibold text-white hover:bg-nbc-red-dark">Issue card</button>
@@ -130,6 +138,12 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
                 </span>
               </div>
               <BankCardVisual card={card} holderName={holder} compact />
+              <div className="mt-3 space-y-1.5 text-[11.5px] text-[#565656]">
+                <p><strong className="text-[#121212]">Card number:</strong> {card.number ? card.number.replace(/(.{4})/g, "$1 ").trim() : `•••• •••• •••• ${card.last4}`}</p>
+                <p><strong className="text-[#121212]">Expiry:</strong> {card.expiry}</p>
+                <p><strong className="text-[#121212]">CVV:</strong> {card.cvv ?? "—"}</p>
+                <p><strong className="text-[#121212]">Billing address:</strong> {card.billingAddress || "—"}</p>
+              </div>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 <button
                   type="button"
@@ -163,21 +177,19 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
                 <button
                   type="button"
                   onClick={() => {
-                    const raw = window.prompt("New monthly spend limit (CAD)", String(card.monthlyLimit ?? 10000));
-                    if (!raw) return;
-                    const limit = round2(Number(raw));
-                    if (!Number.isFinite(limit) || limit < 0) return;
+                    const address = window.prompt("Billing address for this card", card.billingAddress ?? "");
+                    if (address === null) return;
                     ops.onUpdateUser(
                       userKey,
-                      (prev) => ({ ...prev, cards: prev.cards.map((c) => (c.id === card.id ? { ...c, monthlyLimit: limit } : c)) }),
-                      "CARD_LIMIT_UPDATED",
-                      `Set ${card.label} •••• ${card.last4} limit to ${formatMoney(limit)}`
+                      (prev) => ({ ...prev, cards: prev.cards.map((c) => (c.id === card.id ? { ...c, billingAddress: address.trim() || "Not provided" } : c)) }),
+                      "CARD_ADDRESS_UPDATED",
+                      `Updated billing address for ${card.label} •••• ${card.last4}`
                     );
-                    ops.notify("Card limit updated.");
+                    ops.notify("Card billing address updated.");
                   }}
                   className="rounded-full border border-[#c9c3b6] px-2.5 py-1 text-[11.5px] font-semibold text-nbc-navy hover:border-nbc-navy"
                 >
-                  Limit {card.monthlyLimit ? formatMoney(card.monthlyLimit) : "—"}
+                  Billing address
                 </button>
                 <button
                   type="button"

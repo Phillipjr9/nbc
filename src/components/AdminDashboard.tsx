@@ -92,6 +92,16 @@ export default function AdminDashboard({
   const [toast, setToast] = useState<string | null>(null);
   const [createRequest, setCreateRequest] = useState(0);
 
+  useEffect(() => {
+    if (users.length === 0) {
+      setSelectedKey("personal");
+      return;
+    }
+    if (!users.some((user) => user.key === selectedKey)) {
+      setSelectedKey(users[0].key);
+    }
+  }, [users, selectedKey]);
+
   const notify = (message: string) => {
     setToast(message);
     window.setTimeout(() => setToast((cur) => (cur === message ? null : cur)), 4000);

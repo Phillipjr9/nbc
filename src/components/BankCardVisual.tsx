@@ -132,8 +132,9 @@ export default function BankCardVisual({ card, holderName, compact = false }: Pr
 
   const style = TIER_STYLES[card.accent];
   const displayName = card.cardholderName || holderName;
-  const fullNumber = `${style.binPrefix} ${card.last4}`;
-  const maskedNumber = `${style.binPrefix.slice(0, 4)}  ••••  ••••  ${card.last4}`;
+  const normalizedCardNumber = card.number?.replace(/\D/g, "") ?? "";
+  const fullNumber = normalizedCardNumber ? normalizedCardNumber.replace(/(.{4})/g, "$1 ").trim() : `${style.binPrefix} ${card.last4}`;
+  const maskedNumber = normalizedCardNumber ? normalizedCardNumber.replace(/.(?=.{4})/g, "•").replace(/(.{4})/g, "$1 ").trim() : `${style.binPrefix.slice(0, 4)}  ••••  ••••  ${card.last4}`;
   const cvv = card.cvv || "742";
 
   const handleCopy = (e: React.MouseEvent) => {

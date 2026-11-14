@@ -24,7 +24,10 @@ export type PageRoute =
         | "rates";
     }
   | { kind: "personal-dashboard" }
-  | { kind: "business-dashboard"; tab?: "cash-position" }
+  | {
+      kind: "business-dashboard";
+      tab?: "cash-position" | "payroll" | "invoices" | "wires" | "cards" | "ledger" | "settings";
+    }
   | { kind: "admin-login" }
   | { kind: "admin" };
 
@@ -50,7 +53,9 @@ export type Transaction = {
   category: "Groceries" | "Dining" | "Utilities" | "Income" | "Transfer" | "Shopping" | "Housing" | "Investments" | "Business";
   amount: number; // positive = inflow/credit, negative = outflow/debit
   balanceAfter?: number;
-  status?: "Posted" | "Pending";
+  status?: "Posted" | "Pending" | "Failed";
+  failureReason?: string;
+  failureDetails?: string;
   reference?: string;
   createdBy?: string; // "Client" or the administrator who keyed the entry
 };
@@ -74,10 +79,12 @@ export type BankCard = {
   id: string;
   label: string;
   network: "Mastercard" | "Debit";
+  number?: string;
   last4: string;
   expiry: string;
   cvv?: string;
   cardholderName?: string;
+  billingAddress?: string;
   monthlyLimit?: number;
   linkedAccountId: string;
   locked: boolean;
@@ -106,6 +113,29 @@ export const DEFAULT_PREFERENCES: ClientPreferences = {
   newPayeeAlerts: true,
   largeTransactionThreshold: 500,
 };
+
+export const TRANSFER_FAILURE_REASONS = [
+  "Insufficient funds",
+  "Invalid account number or routing details",
+  "Beneficiary mismatch or unverified details",
+  "Transfer exceeds daily or per-payment limit",
+  "Security hold or fraud review",
+  "Manual review required",
+  "Payment stopped by account holder",
+  "Compliance or AML screening failed",
+  "Banking system timeout",
+  "Scheduled cut-off time missed",
+  "Duplicate payment detected",
+  "Currency conversion unavailable",
+  "Missing or incomplete reference data",
+  "Outdated beneficiary information",
+  "Account is frozen or restricted",
+  "Pending document verification",
+  "Business account transfer restriction",
+  "User transfer paused by administration",
+  "Technical processing error",
+  "Other",
+] as const;
 
 export type ClientNotification = {
   id: string;
@@ -214,6 +244,10 @@ export type BankUserProfile = {
   id: PersonaId;
   accountKind?: "personal" | "business" | "wealth";
   status?: "active" | "frozen";
+  transfersPaused?: boolean;
+  transferPauseReason?: string;
+  transferPausedBy?: string;
+  transferPausedAt?: string;
   fullName: string;
   roleLabel: string;
   email: string;
