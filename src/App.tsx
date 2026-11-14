@@ -431,9 +431,7 @@ export default function App() {
     };
   }, []);
 
-  const [activeProfileKey, setActiveProfileKey] = useState<string | null>(() =>
-    loadStored<string | null>(STORAGE_SESSION_KEY, null)
-  );
+  const [activeProfileKey, setActiveProfileKey] = useState<string | null>(null);
   const [adminAuth, setAdminAuth] = useState<boolean>(() =>
     loadStored<boolean>(STORAGE_ADMIN_AUTH_KEY, false)
   );
@@ -491,7 +489,11 @@ export default function App() {
 
   useEffect(() => {
     try {
-      window.localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(activeProfileKey));
+      if (activeProfileKey) {
+        window.localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify(activeProfileKey));
+      } else {
+        window.localStorage.removeItem(STORAGE_SESSION_KEY);
+      }
     } catch {
       // ignore
     }
@@ -842,6 +844,7 @@ export default function App() {
 
   const handleCustomerSignOut = () => {
     setActiveProfileKey(null);
+    window.localStorage.removeItem(STORAGE_SESSION_KEY);
     navigate({ kind: "home" });
   };
 
