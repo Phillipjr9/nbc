@@ -858,7 +858,7 @@ const FREQUENCY_DAYS: Record<GeneratorFrequency, number> = {
   yearly: 365,
 };
 
-export const MAX_GENERATED_ENTRIES = 600;
+export const MAX_GENERATED_ENTRIES = 5000;
 
 /**
  * Builds a deterministic-ish series of entries between two dates.
