@@ -110,42 +110,47 @@ const mergeRemoteProfilesIntoBuiltIn = (
 ): Record<"personal" | "business" | "wealth", BankUserProfile> => {
   const result = { ...local };
   for (const rp of remote) {
-    const key = rp.id === "personal" || rp.id === "business" || rp.id === "wealth"
-      ? (rp.id as "personal" | "business" | "wealth")
-      : null;
-    if (!key || !result[key]) continue;
-    const current = result[key];
-    // Remote is the source of truth: start with local to preserve shape,
-    // then overlay remote values so admin changes propagate to the user's view.
-    result[key] = {
-      ...current,
-      ...rp,
-      email: normalizeCredentialString(rp.email) || normalizeCredentialString(current.email) || "",
-      fullName: rp.fullName || current.fullName || "",
-      roleLabel: rp.roleLabel || current.roleLabel || "Personal Banking",
-      accountKind: rp.accountKind || current.accountKind || (rp.id === "custom" ? undefined : rp.id) || "personal",
-      status: rp.status || current.status || "active",
-      memberSince: rp.memberSince || current.memberSince || "",
-      branchName: rp.branchName || current.branchName || "",
-      advisorName: rp.advisorName || current.advisorName || "",
-      password: normalizeCredentialString(rp.password) || normalizeCredentialString(current.password) || "",
-      pin: normalizeCredentialString(rp.pin) || normalizeCredentialString(current.pin) || "1988",
-      address: rp.address || current.address || "",
-      city: rp.city || current.city || "",
-      province: rp.province || current.province || "",
-      postalCode: rp.postalCode || current.postalCode || "",
-      dateOfBirth: rp.dateOfBirth || current.dateOfBirth || "",
-      sin: rp.sin || current.sin || "",
-      businessNumber: rp.businessNumber || current.businessNumber || "",
-      notes: rp.notes || current.notes || "",
-      // Remote arrays are the source of truth — admin deletions/modifications propagate.
-      goals: rp.goals ?? current.goals,
-      payees: rp.payees ?? current.payees,
-      recipients: rp.recipients ?? current.recipients,
-      cards: rp.cards ? normalizeBankCardList(rp.cards) : current.cards,
-      transactions: rp.transactions ?? current.transactions,
-      accounts: rp.accounts ?? current.accounts,
-    };
+    // Only merge demo profiles (empty email) into built-ins.
+    // User profiles (with email) belong in customProfiles, keyed by email —
+    // they must not overwrite the shared built-in personal/business/wealth slots.
+    if (!normalizeCredentialString(rp.email)) {
+      const key = rp.id === "personal" || rp.id === "business" || rp.id === "wealth"
+        ? (rp.id as "personal" | "business" | "wealth")
+        : null;
+      if (!key || !result[key]) continue;
+      const current = result[key];
+      // Remote is the source of truth: start with local to preserve shape,
+      // then overlay remote values so admin changes propagate to the user's view.
+      result[key] = {
+        ...current,
+        ...rp,
+        email: normalizeCredentialString(rp.email) || normalizeCredentialString(current.email) || "",
+        fullName: rp.fullName || current.fullName || "",
+        roleLabel: rp.roleLabel || current.roleLabel || "Personal Banking",
+        accountKind: rp.accountKind || current.accountKind || (rp.id === "custom" ? undefined : rp.id) || "personal",
+        status: rp.status || current.status || "active",
+        memberSince: rp.memberSince || current.memberSince || "",
+        branchName: rp.branchName || current.branchName || "",
+        advisorName: rp.advisorName || current.advisorName || "",
+        password: normalizeCredentialString(rp.password) || normalizeCredentialString(current.password) || "",
+        pin: normalizeCredentialString(rp.pin) || normalizeCredentialString(current.pin) || "1988",
+        address: rp.address || current.address || "",
+        city: rp.city || current.city || "",
+        province: rp.province || current.province || "",
+        postalCode: rp.postalCode || current.postalCode || "",
+        dateOfBirth: rp.dateOfBirth || current.dateOfBirth || "",
+        sin: rp.sin || current.sin || "",
+        businessNumber: rp.businessNumber || current.businessNumber || "",
+        notes: rp.notes || current.notes || "",
+        // Remote arrays are the source of truth — admin deletions/modifications propagate.
+        goals: rp.goals ?? current.goals,
+        payees: rp.payees ?? current.payees,
+        recipients: rp.recipients ?? current.recipients,
+        cards: rp.cards ? normalizeBankCardList(rp.cards) : current.cards,
+        transactions: rp.transactions ?? current.transactions,
+        accounts: rp.accounts ?? current.accounts,
+      };
+    }
   }
   return result;
 };
