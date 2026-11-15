@@ -30,10 +30,16 @@ import ProductPages from "./components/ProductPages";
 import SearchDialog from "./components/SearchDialog";
 import { AdviceSection, HelpSection, Hero, PromoSection, ServicesSection } from "./components/Sections";
 import SupportPages from "./components/SupportPages";
-import { fetchProfiles, upsertProfile } from "./lib/profileSync";
+import { fetchProfileByEmail, fetchProfiles, profileFromRow, upsertProfile } from "./lib/profileSync";
 import { subscribeToProfileChanges } from "./lib/profileRealtime";
 import { ensureProfileShape, isPersistableProfile } from "./lib/profileNormalize";
-import { mergeSupportThreads } from "./banking/supportChat";
+import {
+  diffSupportThreadPatch,
+  isActionablePatch,
+  mergeSupportThreads,
+} from "./banking/supportChat";
+import { applySupportThreadRemote, type SupportThreadState } from "./lib/supportRemote";
+import { stableStringify } from "./lib/stableStringify";
 import { isSupabaseConfigured } from "./lib/supabase";
 
 const STORAGE_PROFILES_KEY = "nbc_profiles_v1";
@@ -191,6 +197,21 @@ const mergeRemoteProfilesIntoBuiltIn = (
   return result;
 };
 
+/** Finds a profile by email across the built-in personas and custom clients. */
+const findProfileByEmail = (
+  builtIn: Record<"personal" | "business" | "wealth", BankUserProfile>,
+  custom: BankUserProfile[],
+  email: string
+): BankUserProfile | null => {
+  const target = email.trim().toLowerCase();
+  if (!target) return null;
+  for (const key of ["personal", "business", "wealth"] as const) {
+    const profile = builtIn[key];
+    if (profile && profile.email.toLowerCase() === target) return profile;
+  }
+  return custom.find((profile) => profile.email.toLowerCase() === target) ?? null;
+};
+
 const mergeRemoteProfiles = (existing: BankUserProfile[], remote: BankUserProfile[]): BankUserProfile[] => {
   const merged = sanitizeCustomProfiles(existing);
 
@@ -267,6 +288,73 @@ export default function App() {
   useEffect(() => { profilesRef.current = profiles; }, [profiles]);
   useEffect(() => { customProfilesRef.current = customProfiles; }, [customProfiles]);
 
+  /**
+   * Signature of the last profile content the server confirmed, per email.
+   *
+   * This is what stops the app writing back the profile it was just given.
+   * Without it, every realtime echo looked like a local edit, was saved, echoed
+   * again, and so on — thousands of row updates, a full-table download per
+   * message, and Support messages that arrived "when they felt like it".
+   */
+  const serverSigRef = useRef(new Map<string, string>());
+
+  /**
+   * Circuit breaker for profile saves, per email.
+   *
+   * The echo loop that made chat slow was caused by exactly this: two devices
+   * writing the same row forever. The signature check above should make that
+   * impossible, but a save loop is bad enough (thousands of row updates) that it
+   * gets a hard limit too: at most 6 saves per profile per 10 s, then the app
+   * stops and logs instead of hammering the database.
+   */
+  const writeBurstRef = useRef(new Map<string, { count: number; since: number }>());
+
+  function allowProfileWrite(email: string): boolean {
+    const now = Date.now();
+    const entry = writeBurstRef.current.get(email);
+    if (!entry || now - entry.since > 10000) {
+      writeBurstRef.current.set(email, { count: 1, since: now });
+      return true;
+    }
+    if (entry.count >= 6) {
+      console.warn("[profiles] Pausing saves for", email, "— too many in a row; this looks like a sync loop.");
+      return false;
+    }
+    entry.count += 1;
+    return true;
+  }
+
+  function rememberServerProfile(profile: BankUserProfile | null | undefined) {
+    if (!profile?.email) return;
+    serverSigRef.current.set(profile.email.toLowerCase(), stableStringify(profile));
+  }
+
+  /** Merges rows that came from the server into state, and marks them as seen. */
+  const applyRemoteProfiles = (incoming: BankUserProfile[]) => {
+    if (incoming.length === 0) return;
+
+    const nextBuiltIn = mergeRemoteProfilesIntoBuiltIn(profilesRef.current, incoming);
+    const nextCustom = mergeRemoteProfiles(customProfilesRef.current, incoming);
+
+    profilesRef.current = nextBuiltIn;
+    customProfilesRef.current = nextCustom;
+    setProfiles(nextBuiltIn);
+    setCustomProfiles(nextCustom);
+
+    for (const remote of incoming) {
+      const merged = findProfileByEmail(nextBuiltIn, nextCustom, remote.email);
+      if (!merged) continue;
+      // Only treat the merged result as "already on the server" when nothing
+      // local was layered back on top. If a message had to be re-added, leave
+      // the signature unset so exactly one repair write goes out.
+      if (stableStringify(merged) === stableStringify(remote)) {
+        serverSigRef.current.set(remote.email.toLowerCase(), stableStringify(merged));
+      } else {
+        serverSigRef.current.delete(remote.email.toLowerCase());
+      }
+    }
+  };
+
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
@@ -278,11 +366,7 @@ export default function App() {
       try {
         const remoteProfiles = await fetchProfiles();
         if (!isMounted) return;
-
-        const nextCustom = mergeRemoteProfiles(customProfilesRef.current, remoteProfiles);
-        const nextBuiltIn = mergeRemoteProfilesIntoBuiltIn(profilesRef.current, remoteProfiles);
-        setCustomProfiles(nextCustom);
-        setProfiles(nextBuiltIn);
+        applyRemoteProfiles(remoteProfiles);
       } catch (error) {
         console.warn("Supabase profile sync skipped:", error);
       }
@@ -290,8 +374,13 @@ export default function App() {
 
     /**
      * Realtime is the fast path (Support messages, desk replies and admin edits
-     * arrive instantly). The interval is only a safety net, and it backs off once
-     * the channel is live so every open tab stops polling every 15 s.
+     * arrive instantly). The interval is only a safety net:
+     *
+     * - channel live → 30 s, enough for the odd missed event;
+     * - channel down → 5 s, so a conversation still moves while the socket is
+     *   reconnecting. It used to be 15 s, which made chat feel broken whenever
+     *   realtime hiccuped (and 120 s while live, which is far too long to
+     *   notice a dropped event).
      */
     const schedulePoll = () => {
       if (intervalId) window.clearInterval(intervalId);
@@ -299,7 +388,7 @@ export default function App() {
         () => {
           void refreshProfiles();
         },
-        realtimeLive ? 120000 : 15000
+        realtimeLive ? 30000 : 5000
       );
     };
 
@@ -307,8 +396,52 @@ export default function App() {
     schedulePoll();
 
     const unsubscribe = subscribeToProfileChanges({
-      onChange: () => {
-        void refreshProfiles();
+      onChange: (changes) => {
+        if (!isMounted) return;
+
+        // Apply the rows Realtime already sent. Re-downloading the whole
+        // `profiles` table for one Support message was the main reason replies
+        // took seconds to appear.
+        const rows: BankUserProfile[] = [];
+        const emailsToFetch: string[] = [];
+        let needsFullRefresh = false;
+
+        for (const change of changes) {
+          if (!change.row) {
+            needsFullRefresh = true; // DELETE: there is no profile to apply
+            continue;
+          }
+
+          const email = typeof change.row.email === "string" ? change.row.email : "";
+          const hasPayload = change.row.profile_data != null && typeof change.row.profile_data === "object";
+
+          // A row that arrived without its document (a column Realtime did not
+          // ship) must be fetched, never merged: treating it as an empty
+          // profile would blank that client's ledger on this device.
+          if (!hasPayload) {
+            if (email) emailsToFetch.push(email);
+            else needsFullRefresh = true;
+            continue;
+          }
+
+          const profile = profileFromRow(change.row);
+          if (profile) rows.push(profile);
+          else if (email) emailsToFetch.push(email);
+          else needsFullRefresh = true;
+        }
+
+        if (rows.length > 0) applyRemoteProfiles(rows);
+
+        if (emailsToFetch.length > 0) {
+          void (async () => {
+            const fetched = await Promise.all(emailsToFetch.map((email) => fetchProfileByEmail(email)));
+            if (!isMounted) return;
+            const usable = fetched.filter((profile): profile is BankUserProfile => Boolean(profile));
+            if (usable.length > 0) applyRemoteProfiles(usable);
+          })();
+        }
+
+        if (needsFullRefresh) void refreshProfiles();
       },
       onStatus: (status) => {
         if (!isMounted) return;
@@ -505,25 +638,59 @@ export default function App() {
       return;
     }
 
-    let isMounted = true;
+    const email = activeProfile.email.toLowerCase();
+    const signature = stableStringify(activeProfile);
 
-    void (async () => {
-      try {
-        const result = await upsertProfile(activeProfile);
-        if (!isMounted) return;
+    // This exact content came from the server (or is what we just sent it).
+    // Saving it again would only broadcast another realtime event to every
+    // device — which used to come straight back here as another "local edit".
+    if (serverSigRef.current.get(email) === signature) return;
 
-        if (result && "ok" in result && result.ok) {
-          console.info("Profile synced to Supabase", activeProfile.email);
+    // Coalesce a burst of local edits (a transfer writes several fields) into
+    // one save instead of one per state update.
+    const timer = window.setTimeout(() => {
+      if (serverSigRef.current.get(email) === signature) return;
+
+      if (!allowProfileWrite(email)) return;
+
+      void (async () => {
+        try {
+          await upsertProfile(activeProfile);
+          serverSigRef.current.set(email, signature);
+        } catch (error) {
+          // Leave the signature unset so the next change retries.
+          serverSigRef.current.delete(email);
+          console.warn("Profile sync skipped:", error);
         }
-      } catch (error) {
-        console.warn("Profile sync skipped:", error);
-      }
-    })();
+      })();
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [activeProfile]);
+
+  /**
+   * Keeps the open Support conversation fresh even when the realtime socket is
+   * unhealthy: one row, every 4 s, only while the client is in the chat.
+   */
+  useEffect(() => {
+    if (!chatOpen || !isSupabaseConfigured) return;
+    const email = activeProfile?.email;
+    if (!email) return;
+
+    let cancelled = false;
+    const id = window.setInterval(() => {
+      void (async () => {
+        const profile = await fetchProfileByEmail(email);
+        if (cancelled || !profile) return;
+        applyRemoteProfiles([profile]);
+      })();
+    }, 4000);
 
     return () => {
-      isMounted = false;
+      cancelled = true;
+      window.clearInterval(id);
     };
-  }, [activeProfile]);
+  }, [chatOpen, activeProfile?.email]);
 
   const activeDashboardRoute: PageRoute = useMemo(() => {
     if (activeProfile && isBusinessProfile(activeProfile)) {
@@ -546,6 +713,83 @@ export default function App() {
     return [...customs, ...builtIns];
   }, [profiles, customProfiles]);
 
+  /**
+   * Sends one Support action to the server.
+   *
+   * The cheap path appends the message inside the database
+   * (`support_thread_apply`), so a conversation can never roll back a message
+   * the other side has just written, and a line costs one small request instead
+   * of a ~70 kB profile rewrite. If the function is not deployed yet, or the
+   * client has no row, we fall back to saving the whole profile.
+   */
+  const pushSupportThread = async (profile: BankUserProfile, patch: ReturnType<typeof diffSupportThreadPatch>) => {
+    if (!patch || !isSupabaseConfigured || !isPersistableProfile(profile)) return;
+
+    const remote = await applySupportThreadRemote(profile.email, patch);
+    if (remote) {
+      reconcileSupportThread(profile.email, remote);
+      return;
+    }
+
+    try {
+      await upsertProfile(profile);
+      rememberServerProfile(profile);
+    } catch (error) {
+      console.warn("Supabase profile upsert failed:", error);
+    }
+  };
+
+  /**
+   * Adopts the thread the database now holds.
+   *
+   * The server copy wins for ordering and read receipts, but messages are
+   * unioned in: if anything local is still missing there, one repair write goes
+   * out instead of the message being dropped.
+   */
+  const reconcileSupportThread = (email: string, remote: SupportThreadState) => {
+    const target = email.toLowerCase();
+
+    const applyTo = (profile: BankUserProfile): BankUserProfile => {
+      if (profile.email.toLowerCase() !== target) return profile;
+      return ensureProfileShape({
+        ...profile,
+        supportThread: mergeSupportThreads(remote.supportThread, profile.supportThread),
+        ...(remote.supportHandoff ? { supportHandoff: true } : {}),
+      });
+    };
+
+    const nextBuiltIn = { ...profilesRef.current };
+    let touchedBuiltIn = false;
+    for (const key of ["personal", "business", "wealth"] as const) {
+      const current = nextBuiltIn[key];
+      if (!current || current.email.toLowerCase() !== target) continue;
+      const updated = applyTo(current);
+      if (updated !== current) {
+        nextBuiltIn[key] = updated;
+        touchedBuiltIn = true;
+      }
+    }
+    if (touchedBuiltIn) {
+      profilesRef.current = nextBuiltIn;
+      setProfiles(nextBuiltIn);
+    }
+
+    const currentCustom = customProfilesRef.current;
+    const nextCustom = currentCustom.map((cp) => (cp.email.toLowerCase() === target ? applyTo(cp) : cp));
+    if (nextCustom.some((profile, index) => profile !== currentCustom[index])) {
+      customProfilesRef.current = nextCustom;
+      setCustomProfiles(nextCustom);
+    }
+
+    const updated = findProfileByEmail(profilesRef.current, customProfilesRef.current, target);
+    if (updated) {
+      // The append succeeded, so this is the state the server holds: mark it as
+      // seen. Deliberately *not* comparing lengths — a mismatch would ask for a
+      // repair write on every echo and turn a dropped message into a loop.
+      rememberServerProfile(updated);
+    }
+  };
+
   const updateUserByKey = (
     key: string,
     updater: (prev: BankUserProfile) => BankUserProfile,
@@ -563,29 +807,54 @@ export default function App() {
         ),
       });
 
-    if (key === "personal" || key === "business" || key === "wealth") {
-      setProfiles((prev) => {
-        const next = normalizeProfile(updater(prev[key]));
-        // Persist to Supabase so remote sync cannot overwrite admin changes.
-        // Fire-and-forget: the 15s sync loop will retry if this write fails.
-        if (isSupabaseConfigured && isPersistableProfile(next)) {
-          upsertProfile(next).catch((err) => console.warn("Supabase profile upsert failed:", err));
-        }
-        return { ...prev, [key]: next };
-      });
+    const isBuiltIn = key === "personal" || key === "business" || key === "wealth";
+    const previous = isBuiltIn
+      ? profilesRef.current[key as "personal" | "business" | "wealth"]
+      : customProfilesRef.current.find((profile) => profile.email.toLowerCase() === key.toLowerCase());
+
+    if (!previous) return;
+
+    // Computed outside the state updater on purpose: React may call an updater
+    // twice (StrictMode, re-renders), and this updater has side effects — the
+    // old code could therefore save the same profile twice per action.
+    const next = normalizeProfile(updater(previous));
+    if (next === previous) return; // nothing changed: no render, no write
+
+    if (isBuiltIn) {
+      const nextProfiles = { ...profilesRef.current, [key]: next };
+      profilesRef.current = nextProfiles;
+      setProfiles(nextProfiles);
     } else {
-      setCustomProfiles((prev) => {
-        const next = prev.map((cp) =>
-          cp.email.toLowerCase() === key.toLowerCase() ? normalizeProfile(updater(cp)) : cp
-        );
-        // Persist to Supabase so remote sync cannot overwrite admin changes.
-        const updated = next.find((cp) => cp.email.toLowerCase() === key.toLowerCase());
-        if (isSupabaseConfigured && updated && isPersistableProfile(updated)) {
-          upsertProfile(updated).catch((err) => console.warn("Supabase profile upsert failed:", err));
-        }
-        return next;
-      });
+      const nextCustom = customProfilesRef.current.map((profile) =>
+        profile.email.toLowerCase() === key.toLowerCase() ? next : profile
+      );
+      customProfilesRef.current = nextCustom;
+      setCustomProfiles(nextCustom);
     }
+
+    const patch = diffSupportThreadPatch(previous, next);
+
+    if (patch) {
+      // A Support-only change (new message, read receipt, "talk to a person"):
+      // append it instead of rewriting the whole profile.
+      if (isActionablePatch(patch)) {
+        void pushSupportThread(next, patch);
+      } else {
+        rememberServerProfile(next);
+      }
+    } else if (isSupabaseConfigured && isPersistableProfile(next)) {
+      // Any other edit still saves the profile. Fire-and-forget: a failure
+      // leaves the signature unset, so the next change (or the poll) retries.
+      void (async () => {
+        try {
+          await upsertProfile(next);
+          rememberServerProfile(next);
+        } catch (error) {
+          console.warn("Supabase profile upsert failed:", error);
+        }
+      })();
+    }
+
     if (logAction && logDetail) {
       appendAudit(logAction, logDetail, severity);
     }

@@ -238,7 +238,10 @@ export default function SupportChat({
    */
   const send = (raw?: string) => {
     const body = (raw ?? draft).trim();
-    if (!body || typing) return;
+    // A second message is never blocked by the assistant's "typing" beat: people
+    // type faster than a canned reply, and holding their words back felt like
+    // the conversation had stalled.
+    if (!body) return;
 
     if (!profile) {
       const answer = answerPublicQuestion(body);
@@ -278,8 +281,10 @@ export default function SupportChat({
 
     setTyping(true);
 
-    // A short "typing" beat keeps the conversation feeling live.
-    const delay = 700 + Math.min(900, body.length * 12);
+    // A short "typing" beat keeps the conversation feeling live. If the client
+    // is already mid-conversation the reply lands right away instead of queueing
+    // another beat on top of the first.
+    const delay = typing ? 120 : 700 + Math.min(900, body.length * 12);
     const timer = window.setTimeout(() => {
       onUpdateProfile((prev) => appendSupportMessage(prev, "support", plan.reply as string, { automated: true }));
       setTyping(false);
