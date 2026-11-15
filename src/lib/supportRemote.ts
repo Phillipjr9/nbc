@@ -91,3 +91,133 @@ export async function applySupportThreadRemote(
     return null;
   }
 }
+
+/* ------------------------------------------------------------------------- *
+ * Change detection for the conversation
+ *
+ * Realtime is the fast path, but it is the only one: a phone that slept, a
+ * socket that was silently dropped, or a network that blocks websockets all
+ * leave a conversation waiting for the 30 s safety-net poll, which is why
+ * replies could take half a minute to appear.
+ *
+ * These helpers give both sides a *cheap* fallback. The digest is one row per
+ * profile (`email`, `updated_at`) — a few hundred bytes — so it can be asked
+ * for every second. When an entry moves, only that conversation is downloaded,
+ * and only its thread (`profile_data->supportThread`), not the whole document.
+ * ------------------------------------------------------------------------- */
+
+/** Lower-cased email → the row it came from. */
+export type SupportDigest = Record<string, { email: string; updatedAt: string }>;
+
+export type SupportThreadSnapshot = {
+  email: string;
+  thread: SupportMessage[];
+  handoff: boolean;
+};
+
+const warn = (message: string, error: unknown) => {
+  console.warn(`[support] ${message}`, error);
+};
+
+/** Reads `email, updated_at` for one profile, or for every profile (the desk). */
+export async function fetchSupportDigest(emails?: string[]): Promise<SupportDigest | null> {
+  if (!isSupabaseConfigured) return null;
+
+  let query = supabase.from("profiles").select("email,updated_at");
+  if (emails && emails.length > 0) query = query.in("email", emails);
+
+  const { data, error } = await query;
+  if (error) {
+    warn("Could not read the Support digest:", error.message);
+    return null;
+  }
+
+  const digest: SupportDigest = {};
+  for (const row of (data ?? []) as { email?: unknown; updated_at?: unknown }[]) {
+    const email = typeof row.email === "string" ? row.email : "";
+    if (!email) continue;
+    digest[email.toLowerCase()] = {
+      email,
+      updatedAt: typeof row.updated_at === "string" ? row.updated_at : "",
+    };
+  }
+  return digest;
+}
+
+/**
+ * Which conversations moved since the previous digest.
+ *
+ * `previous === null` seeds the cache and reports nothing (the app has just
+ * loaded every profile in full). A row that just appeared is reported so the
+ * desk sees a brand-new client.
+ */
+export function diffSupportDigest(previous: SupportDigest | null, next: SupportDigest): string[] {
+  if (!previous) return [];
+  const changed: string[] = [];
+  for (const [key, entry] of Object.entries(next)) {
+    const before = previous[key];
+    if (!before || before.updatedAt !== entry.updatedAt) changed.push(entry.email);
+  }
+  return changed;
+}
+
+/** Reads just the conversation of the given profiles. */
+export async function fetchSupportThreads(emails: string[]): Promise<SupportThreadSnapshot[]> {
+  if (!isSupabaseConfigured || emails.length === 0) return [];
+
+  // PostgREST can project the JSON document down to the two keys we need
+  // (~1 kB instead of the ~150 kB row). Older PostgREST builds reject the
+  // projection, so fall back to the plain column and read the same keys.
+  const projected = await supabase
+    .from("profiles")
+    .select("email,thread:profile_data->supportThread,handoff:profile_data->supportHandoff")
+    .in("email", emails);
+
+  if (!projected.error) {
+    return parseSupportThreadRows(projected.data);
+  }
+
+  const plain = await supabase.from("profiles").select("email,profile_data").in("email", emails);
+  if (plain.error) {
+    warn("Could not read the Support conversation:", plain.error.message);
+    return [];
+  }
+  return parseSupportThreadRows(plain.data);
+}
+
+/**
+ * Normalises a `profiles` payload into conversations.
+ *
+ * Accepts both shapes on purpose: the projected select above and the full row,
+ * so a PostgREST version that refuses the JSON projection cannot stop the desk
+ * from receiving messages.
+ */
+export function parseSupportThreadRows(rows: unknown): SupportThreadSnapshot[] {
+  if (!Array.isArray(rows)) return [];
+
+  const snapshots: SupportThreadSnapshot[] = [];
+  for (const raw of rows as Record<string, unknown>[]) {
+    const email = typeof raw?.email === "string" ? raw.email : "";
+    if (!email) continue;
+
+    const document = (raw.profile_data ?? null) as Record<string, unknown> | null;
+    // `thread` / `supportThread` are the projected keys (depending on how the
+    // JSON path was aliased); `profile_data` is the unprojected row.
+    const threadValue = Array.isArray(raw.thread)
+      ? raw.thread
+      : Array.isArray(raw.supportThread)
+        ? raw.supportThread
+        : document?.supportThread;
+    const handoffValue = raw.handoff ?? raw.supportHandoff ?? document?.supportHandoff;
+
+    const thread = (Array.isArray(threadValue) ? threadValue : []).filter(
+      (message): message is SupportMessage =>
+        Boolean(message) &&
+        typeof message === "object" &&
+        typeof (message as { body?: unknown }).body === "string"
+    );
+
+    snapshots.push({ email, thread, handoff: handoffValue === true || handoffValue === "true" });
+  }
+  return snapshots;
+}

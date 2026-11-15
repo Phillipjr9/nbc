@@ -186,9 +186,31 @@ administrator, agent name, bot or model.
   reconnects with a capped backoff.
   - Requires `supabase/realtime.sql` once per project. Without it the channel
     reports `offline` and the poll takes over.
-- **Poll fallback.** 5 s while realtime is down, 30 s while it is live. The open
-  conversation also refreshes its own row every 4 s, so chat keeps moving even
-  mid-reconnect.
+- **Poll fallback.** 5 s while realtime is down, 30 s while it is live (that
+  poll re-reads every profile, so it stays coarse on purpose).
+- **Thread heartbeat (the guarantee).** Realtime is a websocket, and a websocket
+  fails quietly: a phone that slept, a network that blocks the socket, a channel
+  dropped and reconnected without replaying its events. In all of those cases
+  the conversation used to wait for the 30 s poll — which is what "the messages
+  take forever" was. So both sides now ask a cheap question and only pay for the
+  answer they need:
+  - `fetchSupportDigest()` reads `email, updated_at` — a few hundred bytes, one
+    row per profile, or a single row for a client;
+  - `diffSupportDigest()` says which conversation moved;
+  - `fetchSupportThreads()` downloads **only** `profile_data->supportThread` and
+    `supportHandoff` for those rows (~1 kB, not the ~150 kB profile).
+
+  Cadence: **1.2 s** while the client has the Support panel open, **2 s** while
+  the desk has the console open (its inbox covers every client), and **15 s** in
+  the background so the unread badge stays honest. Polling pauses on a hidden
+  tab and fires immediately on `visibilitychange`, `focus` and `online` — the
+  three moments a device has usually missed something. Opening the panel reads
+  the conversation once straight away.
+
+  Result: a line lands in about a second with Realtime healthy, and in about a
+  second without it. `src/lib/supportRemote.ts` (`fetchSupportDigest`,
+  `diffSupportDigest`, `fetchSupportThreads`, `parseSupportThreadRows`) and
+  `src/__tests__/supportDelivery.test.ts` pin this down.
 - `mergeSupportThreads()` unions the server and local copies by message id, so a
   message written on a second device is never lost by last-write-wins.
 - Demo data: the personal profile ships with one Support message and one client
@@ -216,6 +238,10 @@ Three faults compounded, and all three are fixed:
    table, and the poll was 15 s (120 s while "live"). Fixed by applying the
    Realtime row directly, polling one row per open conversation, and shortening
    the offline poll to 5 s.
+4. **A single fragile path.** Everything above made the *working* case fast, but
+   Realtime was still the only fast path: once the socket died — which a phone
+   does every time it sleeps — the conversation fell back to a 30 s poll. Fixed
+   by the thread heartbeat above, which is fast without Realtime.
 
 The chat also stops holding your words back: a second message is no longer
 blocked by the assistant's "typing" beat.
@@ -250,6 +276,7 @@ blocked by the assistant's "typing" beat.
 | `src/__tests__/publicAssistant.test.ts` | The signed-out topics and their links, greetings, and that nothing names a bot, model or staff member |
 | `src/__tests__/supportChat.test.ts` | Thread append/read/merge, desk notification gating (`awaitingDesk` only), idempotent read marks, ordering, the specialist handoff |
 | `src/__tests__/supportChatWidget.test.tsx` | One launcher only, the direct “Talk to a person now” control, and the specialist status line replacing it |
+| `src/__tests__/supportDelivery.test.ts` | The delivery heartbeat: digest seeding, only-moved conversations reported, and both conversation payload shapes (projected thread and full row) parsed safely |
 | `src/__tests__/supportSync.test.ts` | The append-only patch (messages / read receipts / handoff, and the edits that must *not* take this path), stable profile signatures, and the RPC's fallback when it is not deployed |
 | `src/__tests__/dates.test.ts` | Local-calendar ledger dates (the “history moved by a day” bug) |
 | `src/__tests__/profileNormalize.test.ts` | Partial/legacy profile repair, the write-back guard, ledger sort |
