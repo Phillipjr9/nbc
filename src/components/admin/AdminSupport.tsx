@@ -10,6 +10,7 @@ import {
   supportThreadOf,
   unreadSupportCount,
 } from "../../banking/supportChat";
+import { draftDeskAssist } from "../../banking/supportAssistant";
 import { playSupportSentCue } from "../../lib/notificationSound";
 import { ArrowRight, SearchIcon } from "../icons";
 
@@ -31,6 +32,7 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
   const [search, setSearch] = useState("");
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [draft, setDraft] = useState("");
+  const [assistOpen, setAssistOpen] = useState(true);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const rows = useMemo(
@@ -40,6 +42,7 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
           const thread = supportThreadOf(entry.profile);
           return {
             key: entry.key,
+            profile: entry.profile,
             name: entry.profile.fullName || entry.profile.email,
             email: entry.profile.email,
             role: entry.profile.roleLabel,
@@ -96,6 +99,11 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
     if (!node) return;
     node.scrollTop = node.scrollHeight;
   }, [active?.key, active?.thread.length]);
+
+  const assistant = useMemo(
+    () => (active ? draftDeskAssist(active.profile) : null),
+    [active?.key, active?.thread.length] // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const send = (body: string) => {
     const text = body.trim();
@@ -194,6 +202,11 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
                           Needs reply
                         </span>
                       )}
+                      {!row.awaiting && row.last?.side === "support" && row.last.automated && (
+                        <span className="mt-1 inline-block rounded-full bg-sky-100 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.06em] text-sky-800">
+                          Handled by assistant
+                        </span>
+                      )}
                       {row.status === "frozen" && (
                         <span className="ml-1 mt-1 inline-block rounded-full bg-rose-100 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.06em] text-rose-700">
                           On hold
@@ -287,6 +300,75 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
               </div>
 
               <div className="border-t border-[#efefef] px-3 pb-3 pt-2">
+                {assistant && (
+                  <div className="mb-2 rounded-[6px] border border-[#dbe6f0] bg-[#f6f9fc] p-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-[#1572C5]">
+                        <span aria-hidden="true">✨</span> Assistant briefing
+                        <span className="rounded bg-white px-1.5 py-0.5 text-[9.5px] font-semibold normal-case tracking-normal text-[#565656]">
+                          {assistant.intent} · {Math.round(assistant.confidence * 100)}% confident
+                        </span>
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setAssistOpen((prev) => !prev)}
+                        className="text-[11px] font-semibold text-[#1572C5] hover:underline"
+                      >
+                        {assistOpen ? "Hide" : "Show"}
+                      </button>
+                    </div>
+
+                    {assistOpen && (
+                      <>
+                        <p className="mt-1.5 text-[11.5px] leading-[17px] text-[#334]">{assistant.summary}</p>
+
+                        {assistant.tags.length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {assistant.tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="rounded-full bg-white px-1.5 py-0.5 text-[9.5px] font-semibold text-[#565656] ring-1 ring-[#dbe6f0]"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <p className="mt-2 text-[10.5px] font-bold uppercase tracking-[0.06em] text-[#8a8a8a]">
+                          Suggested reply
+                        </p>
+                        <p className="mt-1 whitespace-pre-wrap rounded-[4px] border border-[#e3edf6] bg-white px-2.5 py-2 text-[12px] leading-[18px] text-[#1a1a1a]">
+                          {assistant.suggestedReply}
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setDraft(assistant.suggestedReply)}
+                            className="rounded-full bg-nbc-navy px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-nbc-red"
+                          >
+                            Insert draft
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => send(assistant.suggestedReply)}
+                            className="rounded-full border border-[#1572C5] px-2.5 py-1 text-[11px] font-semibold text-[#1572C5] transition hover:bg-[#eaf2fa]"
+                          >
+                            Send as-is
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setAssistOpen(false)}
+                            className="rounded-full border border-[#d8d3c7] px-2.5 py-1 text-[11px] font-semibold text-[#565656] transition hover:border-nbc-navy"
+                          >
+                            Discard
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 <div className="mb-2 flex flex-wrap gap-1.5">
                   {replyTemplates.map((template, index) => (
                     <button

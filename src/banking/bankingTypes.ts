@@ -240,8 +240,13 @@ export type SupportMessage = {
   createdAt: string;
   readByClient?: boolean;
   readBySupport?: boolean;
-  /** System acknowledgement, not a human reply — flagged in the back office only. */
+  /** System/assistant reply rather than a person — flagged in the back office only. */
   automated?: boolean;
+  /**
+   * Client message the assistant could not resolve, so the Support desk must
+   * answer it. Drives the desk badge and the new-message chime.
+   */
+  awaitingDesk?: boolean;
 };
 
 export type ScheduledTransfer = {
@@ -575,6 +580,7 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
         createdAt: "2026-05-15T14:12:00.000Z",
         readByClient: true,
         readBySupport: false,
+        awaitingDesk: true,
       },
     ],
     payees: [

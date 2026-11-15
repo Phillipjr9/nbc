@@ -12,7 +12,7 @@ import { toIsoDate } from "../lib/dates";
 
 export const SUPPORT_BRAND = "National Bank Support";
 export const SUPPORT_SHORT_NAME = "Support";
-export const SUPPORT_PRESENCE = "Online · typically replies in a few minutes";
+export const SUPPORT_PRESENCE = "Online · replies instantly, specialist on request";
 
 /** The automated first acknowledgement sent when a client opens a conversation. */
 export const SUPPORT_AUTO_ACK =
@@ -39,7 +39,7 @@ export function appendSupportMessage(
   profile: BankUserProfile,
   side: SupportMessage["side"],
   body: string,
-  options: { automated?: boolean } = {}
+  options: { automated?: boolean; awaitingDesk?: boolean } = {}
 ): BankUserProfile {
   const text = body.trim();
   if (!text) return profile;
@@ -53,6 +53,7 @@ export function appendSupportMessage(
     readByClient: side === "client",
     readBySupport: side === "support",
     ...(options.automated ? { automated: true } : {}),
+    ...(side === "client" && options.awaitingDesk ? { awaitingDesk: true } : {}),
   };
 
   return { ...profile, supportThread: sortThread([...supportThreadOf(profile), message]) };
@@ -81,14 +82,23 @@ export function markSupportThreadRead(
   return changed ? { profile: { ...profile, supportThread: next }, changed } : { profile, changed };
 }
 
-/** Unread messages waiting for one side of the conversation. */
+/**
+ * Unread messages waiting for one side of the conversation.
+ *
+ * For the client this is any Support reply they have not opened yet. For the
+ * desk it is stricter: only messages the assistant escalated, because a chat the
+ * assistant resolved does not need to interrupt an administrator.
+ */
 export function unreadSupportCount(
   profile: BankUserProfile | null | undefined,
   reader: SupportMessage["side"]
 ): number {
   const otherSide = reader === "client" ? "support" : "client";
   const flag = reader === "client" ? "readByClient" : "readBySupport";
-  return supportThreadOf(profile).filter((message) => message.side === otherSide && !message[flag]).length;
+  return supportThreadOf(profile).filter(
+    (message) =>
+      message.side === otherSide && !message[flag] && (reader === "client" || message.awaitingDesk === true)
+  ).length;
 }
 
 export type SupportThreadSummary = {
@@ -173,10 +183,21 @@ export function formatSupportAge(iso: string): string {
   return date.toLocaleDateString("en-CA", { month: "short", day: "numeric" });
 }
 
-/** True when a conversation still needs a reply from the Support desk. */
+/**
+ * True when a specialist still owes the client an answer: an escalated client
+ * message has not yet been followed by a human (non-assistant) Support reply.
+ */
 export function needsSupportReply(profile: BankUserProfile | null | undefined): boolean {
   const thread = supportThreadOf(profile);
   if (thread.length === 0) return false;
-  const last = thread[thread.length - 1];
-  return last.side === "client" || Boolean(unreadSupportCount(profile, "support"));
+
+  let lastEscalatedIndex = -1;
+  thread.forEach((message, index) => {
+    if (message.side === "client" && message.awaitingDesk) lastEscalatedIndex = index;
+  });
+  if (lastEscalatedIndex < 0) return false;
+
+  return !thread
+    .slice(lastEscalatedIndex + 1)
+    .some((message) => message.side === "support" && !message.automated);
 }

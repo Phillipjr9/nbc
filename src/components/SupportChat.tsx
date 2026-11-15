@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BankUserProfile } from "../banking/bankingTypes";
 import {
-  SUPPORT_AUTO_ACK,
   SUPPORT_BRAND,
   SUPPORT_PRESENCE,
   SUPPORT_SHORT_NAME,
@@ -12,6 +11,7 @@ import {
   supportThreadOf,
   unreadSupportCount,
 } from "../banking/supportChat";
+import { generateSupportReply } from "../banking/supportAssistant";
 import { ArrowRight, CloseIcon } from "./icons";
 
 type Props = {
@@ -59,10 +59,15 @@ function SupportAvatar({ size = 36 }: { size?: number }) {
 export default function SupportChat({ profile, onUpdateProfile, defaultOpen = false }: Props) {
   const [open, setOpen] = useState(defaultOpen);
   const [draft, setDraft] = useState("");
-  const [sending, setSending] = useState(false);
+  const [assistantTyping, setAssistantTyping] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const autoAckSent = useRef(false);
+  const timers = useRef<number[]>([]);
+
+  useEffect(() => () => {
+    timers.current.forEach((id) => window.clearTimeout(id));
+    timers.current = [];
+  }, []);
 
   const thread = useMemo(() => supportThreadOf(profile), [profile]);
   const unread = unreadSupportCount(profile, "client");
@@ -97,27 +102,31 @@ export default function SupportChat({ profile, onUpdateProfile, defaultOpen = fa
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
+  /**
+   * Sends a client message and lets the support assistant answer first.
+   *
+   * The assistant runs before the message reaches a specialist: it replies from
+   * the client's own data, and only marks the message `awaitingDesk` when it
+   * cannot resolve the request. That flag is what raises the badge and the
+   * notification chime in the back office.
+   */
   const send = (raw?: string) => {
     const body = (raw ?? draft).trim();
-    if (!body || sending) return;
+    if (!body) return;
 
-    const hasSupportReply = thread.some((message) => message.side === "support");
-    onUpdateProfile((prev) => appendSupportMessage(prev, "client", body));
+    const answer = generateSupportReply(profile, body, thread);
+
+    onUpdateProfile((prev) => appendSupportMessage(prev, "client", body, { awaitingDesk: answer.escalate }));
     setDraft("");
-    setSending(true);
-    window.setTimeout(() => setSending(false), 400);
+    setAssistantTyping(true);
 
-    // First contact gets an immediate, clearly-support acknowledgement so the
-    // customer knows the message landed — no mention of who is on the other end.
-    if (!hasSupportReply && !autoAckSent.current) {
-      autoAckSent.current = true;
-      window.setTimeout(() => {
-        onUpdateProfile((prev) => {
-          if (supportThreadOf(prev).some((message) => message.side === "support")) return prev;
-          return appendSupportMessage(prev, "support", SUPPORT_AUTO_ACK, { automated: true });
-        });
-      }, 900);
-    }
+    // A short "typing" beat keeps the conversation feeling live.
+    const delay = 700 + Math.min(900, body.length * 12);
+    const timer = window.setTimeout(() => {
+      onUpdateProfile((prev) => appendSupportMessage(prev, "support", answer.reply, { automated: true }));
+      setAssistantTyping(false);
+    }, delay);
+    timers.current.push(timer);
   };
 
   const lastSupportMessage = [...thread].reverse().find((message) => message.side === "support");
@@ -256,8 +265,20 @@ export default function SupportChat({ profile, onUpdateProfile, defaultOpen = fa
               );
             })}
 
-            {sending && (
-              <p className="pl-8 text-[10.5px] italic text-[#8a8a8a]">{SUPPORT_SHORT_NAME} is receiving your message…</p>
+            {assistantTyping && (
+              <div className="flex items-center gap-2 pl-1" aria-live="polite">
+                <SupportAvatar size={24} />
+                <span className="flex items-center gap-1 rounded-[10px] rounded-bl-[3px] bg-white px-3 py-2 shadow-sm">
+                  {[0, 1, 2].map((dot) => (
+                    <span
+                      key={dot}
+                      className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#b9b3a7]"
+                      style={{ animationDelay: `${dot * 120}ms` }}
+                    />
+                  ))}
+                  <span className="ml-1 text-[10.5px] text-[#8a8a8a]">{SUPPORT_SHORT_NAME} is typing…</span>
+                </span>
+              </div>
             )}
           </div>
 
@@ -293,10 +314,11 @@ export default function SupportChat({ profile, onUpdateProfile, defaultOpen = fa
                 <ArrowRight className="h-4 w-4" />
               </button>
             </div>
-            <p className="mt-1.5 px-1 text-[10.5px] text-[#8a8a8a]">
+            <p className="mt-1.5 px-1 text-[10.5px] leading-[15px] text-[#8a8a8a]">
               {lastSupportMessage
-                ? `${SUPPORT_SHORT_NAME} usually replies within a few minutes. This conversation is saved to your profile.`
-                : "Messages are saved to your profile so you can pick up where you left off on any device."}
+                ? `${SUPPORT_SHORT_NAME} replies instantly and can bring in a specialist at any time. Saved to your profile.`
+                : "Messages are saved to your profile so you can pick up where you left off on any device."}{" "}
+              <span className="whitespace-nowrap">Automated assistance may be used.</span>
             </p>
           </form>
         </section>
