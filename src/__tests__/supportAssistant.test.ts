@@ -158,20 +158,31 @@ describe("draftDeskAssist", () => {
 });
 
 describe("planSupportTurn", () => {
-  it("lets the assistant answer a question it can resolve", () => {
-    const profile = fixture();
-    const plan = planSupportTurn(profile, "What is my balance?", []);
-
-    expect(plan.awaitingDesk).toBe(false);
-    expect(plan.reply).toMatch(/\$/);
-    expect(plan.intent).toBe("balance");
+  it("never answers on its own — every message goes to the desk", () => {
+    // The automatic reply was the problem: most questions fell through to the
+    // same canned line, so every message got an identical robot answer and the
+    // specialist's reply was buried underneath it.
+    for (const message of [
+      "What is my balance?",
+      "I lost my card yesterday",
+      "hello",
+      "my card was declined",
+      "what are your hours?",
+      "thanks",
+    ]) {
+      const plan = planSupportTurn(fixture(), message, []);
+      expect(plan.awaitingDesk, message).toBe(true);
+      expect(plan.reply, message).toBeNull();
+    }
   });
 
-  it("escalates and still answers when the assistant cannot resolve it", () => {
-    const plan = planSupportTurn(fixture(), "I lost my card yesterday", []);
-    expect(plan.awaitingDesk).toBe(true);
-    expect(plan.reply).toBeTruthy();
-    expect(plan.intent).toBe("card_lost");
+  it("still triages the message for the desk", () => {
+    const balance = planSupportTurn(fixture(), "What is my balance?", []);
+    expect(balance.intent).toBe("balance");
+
+    const lost = planSupportTurn(fixture(), "I lost my card yesterday", []);
+    expect(lost.intent).toBe("card_lost");
+    expect(lost.tags.length).toBeGreaterThan(0);
   });
 
   it("stays out of the way once the client asked for a person", () => {
