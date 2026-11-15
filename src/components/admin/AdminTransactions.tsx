@@ -191,76 +191,86 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
       return;
     }
 
-    ops.onUpdateUser(
-      userKey,
-      (prev) => {
-        const normalizedTx = prev.transactions.find((candidate) => candidate.id === tx.id) ?? tx;
-        // Find paired transaction (opposite amount, same date) for internal transfers
-        const paired = prev.transactions.find((candidate) => {
-          if (candidate.id === normalizedTx.id) return false;
-          if (candidate.accountId === normalizedTx.accountId) return false;
-          if (candidate.date !== normalizedTx.date) return false;
-          if (candidate.amount === -normalizedTx.amount && Math.abs(candidate.amount) === Math.abs(normalizedTx.amount)) return true;
-          if (
-            Math.abs(candidate.amount) === Math.abs(normalizedTx.amount) &&
-            (candidate.description.toLowerCase().includes("card") || normalizedTx.description.toLowerCase().includes("card")) &&
-            (candidate.description.toLowerCase().includes("transfer") || normalizedTx.description.toLowerCase().includes("transfer"))
-          ) {
-            return true;
+    try {
+      ops.onUpdateUser(
+        userKey,
+        (prev) => {
+          if (!Array.isArray(prev.transactions) || !Array.isArray(prev.accounts)) {
+            ops.notify("Cannot reverse: profile data is incomplete.");
+            return prev;
           }
-          return false;
-        });
 
-        const reversedEntries = [
-          {
-            id: newId("rev"),
-            accountId: normalizedTx.accountId,
-            date: todayIso(),
-            description: `Reversal — ${normalizedTx.description} [${reason}]`,
-            category: "Transfer" as const,
-            amount: -normalizedTx.amount,
-            status: "Posted" as const,
-            reference: `REV-${randomDigits(6)}`,
-            createdBy: "Administration",
-            failureReason: reason,
-            failureDetails: `Reversed by administration: ${reason}`,
-          },
-          ...(paired
-            ? [{
-                id: newId("rev"),
-                accountId: paired.accountId,
-                date: todayIso(),
-                description: `Reversal — ${paired.description} [${reason}]`,
-                category: "Transfer" as const,
-                amount: -paired.amount,
-                status: "Posted" as const,
-                reference: `REV-${randomDigits(6)}`,
-                createdBy: "Administration",
-                failureReason: reason,
-                failureDetails: `Reversed by administration: ${reason}`,
-              }]
-            : []),
-        ];
+          const normalizedTx = prev.transactions.find((candidate) => candidate.id === tx.id) ?? tx;
+          // Find paired transaction (opposite amount, same date) for internal transfers
+          const paired = prev.transactions.find((candidate) => {
+            if (candidate.id === normalizedTx.id) return false;
+            if (candidate.accountId === normalizedTx.accountId) return false;
+            if (candidate.date !== normalizedTx.date) return false;
+            if (candidate.amount === -normalizedTx.amount && Math.abs(candidate.amount) === Math.abs(normalizedTx.amount)) return true;
+            if (
+              Math.abs(candidate.amount) === Math.abs(normalizedTx.amount) &&
+              (candidate.description.toLowerCase().includes("card") || normalizedTx.description.toLowerCase().includes("card")) &&
+              (candidate.description.toLowerCase().includes("transfer") || normalizedTx.description.toLowerCase().includes("transfer"))
+            ) {
+              return true;
+            }
+            return false;
+          });
 
-        return {
-          ...prev,
-          accounts: prev.accounts.map((account) => {
-            if (account.id === normalizedTx.accountId) {
-              return { ...account, balance: round2(account.balance - normalizedTx.amount) };
-            }
-            if (paired && account.id === paired.accountId) {
-              return { ...account, balance: round2(account.balance - paired.amount) };
-            }
-            return account;
-          }),
-          transactions: [...reversedEntries, ...prev.transactions.filter((candidate) => candidate.id !== normalizedTx.id && (!paired || candidate.id !== paired.id))],
-        };
-      },
-      "TX_REVERSED",
-      `Reversed "${tx.description}" (${formatMoney(tx.amount)}) — Reason: ${reason}`,
-      "warning"
-    );
-    ops.notify("Reversal posted with a counter-entry.");
+          const reversedEntries = [
+            {
+              id: newId("rev"),
+              accountId: normalizedTx.accountId,
+              date: todayIso(),
+              description: `Reversal — ${normalizedTx.description} [${reason}]`,
+              category: "Transfer" as const,
+              amount: -normalizedTx.amount,
+              status: "Posted" as const,
+              reference: `REV-${randomDigits(6)}`,
+              createdBy: "Administration",
+              failureReason: reason,
+              failureDetails: `Reversed by administration: ${reason}`,
+            },
+            ...(paired
+              ? [{
+                  id: newId("rev"),
+                  accountId: paired.accountId,
+                  date: todayIso(),
+                  description: `Reversal — ${paired.description} [${reason}]`,
+                  category: "Transfer" as const,
+                  amount: -paired.amount,
+                  status: "Posted" as const,
+                  reference: `REV-${randomDigits(6)}`,
+                  createdBy: "Administration",
+                  failureReason: reason,
+                  failureDetails: `Reversed by administration: ${reason}`,
+                }]
+              : []),
+          ];
+
+          return {
+            ...prev,
+            accounts: prev.accounts.map((account) => {
+              if (account.id === normalizedTx.accountId) {
+                return { ...account, balance: round2(account.balance - normalizedTx.amount) };
+              }
+              if (paired && account.id === paired.accountId) {
+                return { ...account, balance: round2(account.balance - paired.amount) };
+              }
+              return account;
+            }),
+            transactions: [...reversedEntries, ...prev.transactions.filter((candidate) => candidate.id !== normalizedTx.id && (!paired || candidate.id !== paired.id))],
+          };
+        },
+        "TX_REVERSED",
+        `Reversed "${tx.description}" (${formatMoney(tx.amount)}) — Reason: ${reason}`,
+        "warning"
+      );
+      ops.notify("Reversal posted with a counter-entry.");
+    } catch (err) {
+      ops.notify("Reversal failed. Please try again.");
+      console.error("Reverse error:", err);
+    }
   };
 
   const deleteTx = (userKey: string, tx: Transaction) => {
