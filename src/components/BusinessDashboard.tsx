@@ -16,6 +16,8 @@ import {
   FX_RATES,
   TRANSFER_FAILURE_REASONS,
 } from "../banking/bankingTypes";
+import { formatIsoDate, todayIso as localTodayIso } from "../lib/dates";
+import { sortTransactionsDesc } from "../lib/profileNormalize";
 import { randomDigits, round2 } from "../banking/adminOps";
 import BankCardVisual from "./BankCardVisual";
 import { ArrowRight, HelpIcon, LockIcon, SearchIcon } from "./icons";
@@ -104,10 +106,10 @@ export default function BusinessDashboard({
   const [activityPage, setActivityPage] = useState(0);
   const ACTIVITY_PAGE_SIZE = 6;
   const sortedTransactions = useMemo(
-    () => [...profile.transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    () => sortTransactionsDesc(profile.transactions),
     [profile.transactions]
   );
-  const selectedTx = profile.transactions.find((tx) => tx.id === selectedTxId) ?? null;
+  const selectedTx = (profile.transactions ?? []).find((tx) => tx.id === selectedTxId) ?? null;
   const selectedTxAccount = selectedTx ? profile.accounts.find((a) => a.id === selectedTx.accountId) : null;
   const accountDetail = profile.accounts.find((a) => a.id === accountDetailId) ?? null;
   const accountDetailTransactions = useMemo(
@@ -258,7 +260,7 @@ export default function BusinessDashboard({
     }));
   };
 
-  const todayIso = () => new Date().toISOString().slice(0, 10);
+  const todayIso = () => localTodayIso();
   const nowStamp = () =>
     new Date().toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit", hour12: true });
   const makeRef = (p: string) => `${p}-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -275,12 +277,10 @@ export default function BusinessDashboard({
   const generatePdfStatement = (accountId: string | "all") => {
     const subjectAccount = accountId === "all" ? null : profile.accounts.find((a) => a.id === accountId) ?? null;
     const rows = accountId === "all"
-      ? [...profile.transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      ? sortTransactionsDesc(profile.transactions)
       : accountDetailTransactions.length
         ? accountDetailTransactions
-        : profile.transactions
-            .filter((tx) => tx.accountId === accountId)
-            .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        : sortTransactionsDesc((profile.transactions ?? []).filter((tx) => tx.accountId === accountId));
 
     const statementDate = new Date();
     const statementPeriodLabel = new Intl.DateTimeFormat("en-CA", { month: "long", year: "numeric" }).format(statementDate);
@@ -1222,11 +1222,8 @@ export default function BusinessDashboard({
     const groups = new Map<string, { label: string; txs: typeof filteredLedger }>();
 
     for (const tx of filteredLedger) {
-      const monthKey = tx.date.slice(0, 7);
-      const label = new Date(`${tx.date}T12:00:00`).toLocaleDateString("en-CA", {
-        month: "long",
-        year: "numeric",
-      });
+      const monthKey = (tx.date ?? "").slice(0, 7);
+      const label = formatIsoDate(tx.date, { month: "long", year: "numeric" });
 
       const existing = groups.get(monthKey);
       if (existing) {

@@ -165,7 +165,7 @@ export default function AdminDashboard({
       if (p.status === "frozen") frozen += 1;
       if ((p.kycStatus ?? "unverified") !== "verified") unverified += 1;
       accounts += p.accounts.length;
-      entries += p.transactions.length;
+      entries += (p.transactions ?? []).length;
       cards += p.cards.length;
       lockedCards += p.cards.filter((c) => c.locked).length;
       for (const a of p.accounts) {
@@ -577,7 +577,7 @@ function ClientDetailView({
               <Kpi label="Accounts" value={String(p.accounts.length)} sub={`${p.cards.length} cards`} />
               <Kpi label="Total deposits" value={formatMoney(p.accounts.filter((a) => a.category !== "credit" && a.category !== "loan").reduce((s, a) => s + a.balance * (a.currency === "USD" ? 1.36 : 1), 0))} sub="Cash & savings" />
               <Kpi label="Credit owing" value={formatMoney(p.accounts.filter((a) => a.category === "credit" || a.category === "loan").reduce((s, a) => s + Math.min(a.balance, a.limit ?? 0), 0))} sub="Credit & loans" />
-              <Kpi label="Transactions" value={String(p.transactions.length)} sub={`${p.transactions.filter((t) => t.date === todayIso()).length} today`} />
+              <Kpi label="Transactions" value={String((p.transactions ?? []).length)} sub={`${(p.transactions ?? []).filter((t) => t.date === todayIso()).length} today`} />
             </div>
 
             <div className="grid gap-5 lg:grid-cols-2">
@@ -672,7 +672,7 @@ function ClientDetailView({
                 <span className="text-right">Status</span>
               </div>
               <div className="divide-y divide-[#efefef]">
-                {p.transactions.length === 0 ? (
+                {(p.transactions ?? []).length === 0 ? (
                   <p className="px-4 py-8 text-center text-[13px] text-[#565656]">No transactions yet.</p>
                 ) : (
                   p.transactions

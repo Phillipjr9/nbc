@@ -18,7 +18,9 @@ import {
   type AuthState,
 } from "../lib/supabaseAuth";
 import { isSupabaseConfigured } from "../lib/supabase";
-import { fetchProfiles } from "../lib/profileSync";
+import { fetchProfileByEmail, fetchProfiles } from "../lib/profileSync";
+import { ensureProfileShape } from "../lib/profileNormalize";
+import { todayIso as localTodayIso } from "../lib/dates";
 
 type LoginPageProps = {
   portal?: LoginPortal;
@@ -110,8 +112,9 @@ export function LoginPage({
       if (supabaseResult && supabaseResult.ok && supabaseResult.user) {
         // Supabase auth succeeded - now find the local profile
         // Check custom profiles first
+        const authUser = supabaseResult.user;
         const matchedCustom = customProfiles.find(
-          (p) => p.email.toLowerCase() === result.user.email.toLowerCase()
+          (p) => p.email.toLowerCase() === authUser.email.toLowerCase()
         );
         if (matchedCustom) {
           setPendingProfile(matchedCustom);
@@ -125,35 +128,29 @@ export function LoginPage({
           { persona: "business", password: "Business2025!", pin: "2486" },
           { persona: "wealth", password: "Wealth2025!", pin: "6194" },
         ];
-        const builtIn = builtIns.find((b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === supabaseResult!.user.email.toLowerCase());
+        const builtIn = builtIns.find(
+          (b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === authUser.email.toLowerCase()
+        );
         if (builtIn) {
           setPendingPersona(builtIn.persona);
           setStep("pin");
           return;
         }
 
-        // No matching profile found - log in anyway for Supabase-synced profiles
-        // The profile will be fetched from Supabase when the dashboard loads
-        onSignInCustom({
-          id: "supabase-" + supabaseResult!.user.id,
-          accountKind: "personal",
-          status: "active",
-          fullName: "Supabase User",
-          roleLabel: "Personal Banking",
-          email: result.user.email,
-          pin: "",
-          memberSince: new Date().toISOString().slice(0, 4),
-          branchName: "Online Banking",
-          advisorName: "Digital Advisor",
-          accounts: [],
-          transactions: [],
-          payees: [],
-          recipients: [],
-          cards: [],
-          pendingCards: [],
-          goals: [],
-        });
-        setError("");
+        // Supabase accepted the password, but this device has never seen the
+        // profile (new browser, cleared storage, different country). Pull the
+        // real record instead of opening an empty placeholder — the placeholder
+        // had no accounts and no transactions, so the ledger looked wiped.
+        const remoteProfile = await fetchProfileByEmail(authUser.email);
+        if (remoteProfile) {
+          onSignInCustom(ensureProfileShape(remoteProfile));
+          setError("");
+          return;
+        }
+
+        setError(
+          "We verified your sign-in but could not load your banking profile. Please refresh and try again, or contact Client Services at 1-888-835-6281."
+        );
         return;
       }
 
@@ -876,7 +873,7 @@ export function SignupPage({ initialSegment = "personal", onNavigate, onCreatePr
   const handleFinishSignup = (e: React.FormEvent) => {
     e.preventDefault();
     const isBiz = segment === "business";
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localTodayIso();
     const chkAmt = Math.round(initialDeposit * 0.45 * 100) / 100;
     const savAmt = Math.round((initialDeposit - chkAmt) * 100) / 100;
     const suffix = Math.floor(10000 + Math.random() * 89999);

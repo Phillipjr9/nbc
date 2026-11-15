@@ -228,7 +228,7 @@ export function AdminSearch({ ops, onOpenTab, onSelectKey }: AdminPanelProps) {
           hits.push({ kind: "Account", label: a.name, meta: `${u.profile.fullName} · ${a.number} · ${formatMoney(a.balance, a.currency)}`, key: u.key, tab: "accounts" });
         }
       }
-      for (const t of u.profile.transactions.slice(0, 60)) {
+      for (const t of (u.profile.transactions ?? []).slice(0, 60)) {
         if (t.description.toLowerCase().includes(q) || (t.reference ?? "").toLowerCase().includes(q)) {
           hits.push({ kind: "Transaction", label: t.description, meta: `${u.profile.fullName} · ${t.date} · ${formatMoney(t.amount)}`, key: u.key, tab: "transactions" });
         }
