@@ -98,24 +98,6 @@ export const ADMIN_ACCOUNTS: AdminAccountRecord[] = [
     role: "superadmin",
     password: "admin1234",
   },
-  {
-    name: "Phillip Johnson",
-    email: "phillip.admin@nbc.ca",
-    role: "superadmin",
-    password: "AdminBusiness2026!",
-  },
-  {
-    name: "Luc Bergeron",
-    email: "ops@nbc.ca",
-    role: "operations",
-    password: "ops12345",
-  },
-  {
-    name: "Sophie Nguyen",
-    email: "support@nbc.ca",
-    role: "support",
-    password: "support1234",
-  },
 ];
 
 export type AdminAuthResult =
