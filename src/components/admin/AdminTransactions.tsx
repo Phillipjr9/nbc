@@ -863,17 +863,17 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
               <div className="flex justify-between gap-4">
                 <div>
                   <p className="text-[11px] text-[#565656]">Transaction</p>
-                  <p className="font-semibold text-[#121212]">{pendingReversal.tx.description}</p>
+                  <p className="font-semibold text-[#121212]">{pendingReversal?.tx?.description ?? "Unknown transaction"}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-[11px] text-[#565656]">Amount</p>
-                  <p className={`font-semibold tabular-nums ${pendingReversal.tx.amount >= 0 ? "text-[#017a33]" : "text-[#121212]"}`}>
-                    {pendingReversal.tx.amount >= 0 ? "+" : ""}{formatMoney(pendingReversal.tx.amount, "CAD")}
+                  <p className={`font-semibold tabular-nums ${(pendingReversal?.tx?.amount ?? 0) >= 0 ? "text-[#017a33]" : "text-[#121212]"}`}>
+                    {(pendingReversal?.tx?.amount ?? 0) >= 0 ? "+" : ""}{formatMoney(pendingReversal?.tx?.amount ?? 0, "CAD")}
                   </p>
                 </div>
               </div>
               <p className="mt-2 text-[11px] text-[#565656]">
-                {pendingReversal.tx.date} · {pendingReversal.tx.status ?? "Posted"}
+                {pendingReversal?.tx?.date ?? ""} · {pendingReversal?.tx?.status ?? "Posted"}
               </p>
             </div>
 
@@ -908,6 +908,11 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
               <button
                 type="button"
                 onClick={() => {
+                  if (!pendingReversal?.tx?.id) {
+                    ops.notify("Cannot reverse: transaction data is missing.");
+                    setPendingReversal(null);
+                    return;
+                  }
                   const reason = customReversalReason.trim() || reversalReason;
                   reverseTx(pendingReversal.userKey, pendingReversal.tx, reason);
                   setPendingReversal(null);
