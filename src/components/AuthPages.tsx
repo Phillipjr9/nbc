@@ -18,6 +18,7 @@ import {
   type AuthState,
 } from "../lib/supabaseAuth";
 import { isSupabaseConfigured } from "../lib/supabase";
+import { fetchProfiles } from "../lib/profileSync";
 
 type LoginPageProps = {
   portal?: LoginPortal;
@@ -98,9 +99,15 @@ export function LoginPage({
     }
 
     // Try Supabase auth first if configured (more reliable across browsers)
+    let supabaseResult: { ok: boolean; error?: string; user?: { email: string; id: string } } | null = null;
     if (isSupabaseConfigured) {
-      const result = await signInWithEmail(cleanEmail, pass);
-      if (result.ok && result.user) {
+      try {
+        supabaseResult = await signInWithEmail(cleanEmail, pass);
+      } catch (err: unknown) {
+        console.warn("Supabase signInWithPassword threw:", err);
+        supabaseResult = { ok: false, error: "Supabase sign-in error" };
+      }
+      if (supabaseResult && supabaseResult.ok && supabaseResult.user) {
         // Supabase auth succeeded - now find the local profile
         // Check custom profiles first
         const matchedCustom = customProfiles.find(
@@ -118,7 +125,7 @@ export function LoginPage({
           { persona: "business", password: "Business2025!", pin: "2486" },
           { persona: "wealth", password: "Wealth2025!", pin: "6194" },
         ];
-        const builtIn = builtIns.find((b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === result.user.email.toLowerCase());
+        const builtIn = builtIns.find((b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === supabaseResult!.user.email.toLowerCase());
         if (builtIn) {
           setPendingPersona(builtIn.persona);
           setStep("pin");
@@ -128,7 +135,7 @@ export function LoginPage({
         // No matching profile found - log in anyway for Supabase-synced profiles
         // The profile will be fetched from Supabase when the dashboard loads
         onSignInCustom({
-          id: "supabase-" + result.user.id,
+          id: "supabase-" + supabaseResult!.user.id,
           accountKind: "personal",
           status: "active",
           fullName: "Supabase User",
@@ -150,24 +157,47 @@ export function LoginPage({
         return;
       }
 
-      // Supabase auth failed - if it's not a "not configured" error, show the error
-      if (result.error && !result.error.includes("not configured")) {
-        setError(result.error);
-        return;
+      // Supabase auth failed - don't show error yet, try local auth fallback first
+      // (GoTrue rejects SQL-created users, so we fall through to local auth below)
+      if (supabaseResult && supabaseResult.error && supabaseResult.error.includes("not configured")) {
+        // Supabase not configured - fall through to local auth
       }
     }
 
-    // Fall back to local authentication if Supabase is not configured or failed
+    // Fall back to local authentication using profiles table data
+    // This is needed because GoTrue rejects SQL-created users
     const matchedCustom = customProfiles.find((p) => normalizeCredentialInput(p.email).toLowerCase() === cleanEmail);
     if (matchedCustom) {
       const storedPassword = normalizeCredentialInput(matchedCustom.password ?? "");
-      if (storedPassword !== pass) {
-        setError("The password entered does not match our records.");
+      if (storedPassword === pass) {
+        setPendingProfile(matchedCustom);
+        setStep("pin");
         return;
       }
-      setPendingProfile(matchedCustom);
-      setStep("pin");
+      setError("The password entered does not match our records.");
       return;
+    }
+
+    // If custom profiles are empty (first visit), try to fetch them from Supabase REST API
+    if (customProfiles.length === 0 && isSupabaseConfigured) {
+      try {
+        const remoteProfiles = await fetchProfiles();
+        if (remoteProfiles.length > 0) {
+          const fetchedMatch = remoteProfiles.find((p) => normalizeCredentialInput(p.email).toLowerCase() === cleanEmail);
+          if (fetchedMatch) {
+            const storedPassword = normalizeCredentialInput(fetchedMatch.password ?? "");
+            if (storedPassword === pass) {
+              setPendingProfile(fetchedMatch);
+              setStep("pin");
+              return;
+            }
+            setError("The password entered does not match our records.");
+            return;
+          }
+        }
+      } catch (fetchError) {
+        console.warn("Profile sync failed during login fallback:", fetchError);
+      }
     }
 
     const builtIns: { persona: "personal" | "business" | "wealth"; password: string; pin: string }[] = [
@@ -186,7 +216,10 @@ export function LoginPage({
       return;
     }
 
-    // If Supabase is configured and we get here, it means auth failed
+    // If Supabase is configured and we get here, it means auth failed, but
+    // local/custom profile records are still valid authentication sources for
+    // data-backed staff/client accounts that have not been created as Supabase
+    // Auth users yet.
     if (isSupabaseConfigured) {
       setError("Invalid email or password. Please try again.");
       return;
@@ -628,17 +661,17 @@ export function AdminLoginPage({
             Internal Operations
           </p>
           <h1 className="mt-1 text-[25px] font-bold text-nbc-navy">
-            Administration & Core Operations Sign-In
+            Administration Sign-In
           </h1>
           <p className="mt-1.5 text-[14px] text-[#565656]">
             Authorized access for client administration, account adjustments, card issuance, and site rates.
-            Your access level is determined by your administrator account.
+            Sign in with your administrator credentials to access the back-office console.
           </p>
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <div>
               <label htmlFor="adm-id" className="block text-[13.5px] font-semibold text-[#121212]">
-                Employee email / ID
+                Administrator email
               </label>
               <input
                 id="adm-id"
@@ -671,10 +704,10 @@ export function AdminLoginPage({
             </button>
           </form>
 
-          {/* Provisioned administrator accounts */}
+          {/* Provisioned administrator account */}
           <div className="mt-5 rounded-[6px] border border-[#e5e2da] bg-[#fcfbf8] p-4">
             <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#565656]">
-              Provisioned administrator accounts
+              Provisioned administrator account
             </p>
             <ul className="mt-2 divide-y divide-[#ececec] text-[12.5px]">
               {ADMIN_ACCOUNTS.map((a) => (
@@ -703,7 +736,7 @@ export function AdminLoginPage({
               ))}
             </ul>
             <p className="mt-2 text-[11px] leading-[16px] text-[#777]">
-              Choose an account to fill the form, then sign in. Your access level is set by the account.
+              Choose an account to fill the form, then sign in. You have full administrative access.
             </p>
           </div>
 

@@ -31,7 +31,8 @@ export type AdminTabId =
  * Administrator identity, roles & permissions
  * ------------------------------------------------------------------ */
 
-export type AdminRole = "superadmin" | "operations" | "support";
+// Single super-administrator role — all admin permissions granted.
+export type AdminRole = "superadmin";
 
 export type AdminIdentity = {
   name: string;
@@ -58,31 +59,8 @@ export type AdminPermission =
   | "impersonate"
   | "system.reset";
 
-const ROLE_PERMISSIONS: Record<AdminRole, AdminPermission[] | "*"> = {
-  superadmin: "*",
-  operations: [
-    "clients.create",
-    "clients.edit",
-    "accounts.adjust",
-    "transactions.post",
-    "transactions.reverse",
-    "transactions.pause",
-    "cards.issue",
-    "ops.run",
-  ],
-  support: ["clients.edit"],
-};
-
 export const ROLE_LABEL: Record<AdminRole, string> = {
   superadmin: "Super administrator",
-  operations: "Operations officer",
-  support: "Client support (read-only)",
-};
-
-export const ROLE_DESCRIPTION: Record<AdminRole, string> = {
-  superadmin: "Unrestricted access, including configuration, deletions and system reset.",
-  operations: "Day-to-day processing: clients, balances, transactions, cards and approvals.",
-  support: "Can view all records and update contact details. Cannot move money.",
 };
 
 /**
@@ -97,24 +75,6 @@ export const ADMIN_ACCOUNTS: AdminAccountRecord[] = [
     email: "admin@nbc.ca",
     role: "superadmin",
     password: "admin1234",
-  },
-  {
-    name: "Phillip Johnson",
-    email: "phillip.admin@nbc.ca",
-    role: "superadmin",
-    password: "AdminBusiness2026!",
-  },
-  {
-    name: "Luc Bergeron",
-    email: "ops@nbc.ca",
-    role: "operations",
-    password: "ops12345",
-  },
-  {
-    name: "Sophie Nguyen",
-    email: "support@nbc.ca",
-    role: "support",
-    password: "support1234",
   },
 ];
 
@@ -141,10 +101,9 @@ export function authenticateAdmin(email: string, password: string): AdminAuthRes
   };
 }
 
-export function can(identity: AdminIdentity | null, permission: AdminPermission): boolean {
-  if (!identity) return false;
-  const allowed = ROLE_PERMISSIONS[identity.role];
-  return allowed === "*" || allowed.includes(permission);
+export function can(_identity: AdminIdentity | null, _permission: AdminPermission): boolean {
+  // Single super-administrator role — all permissions granted.
+  return true;
 }
 
 /* ------------------------------------------------------------------ *
@@ -1032,15 +991,20 @@ export function applyCardApprovalDecision(
   decision: "approved" | "rejected",
   actor: string
 ): BankUserProfile {
+  const remainingPending = (profile.pendingCards ?? []).filter(
+    (pc) => pc.approvalRequestId !== pendingCard.approvalRequestId
+  );
   if (decision === "rejected") {
     return {
       ...profile,
+      pendingCards: remainingPending,
       notes: [profile.notes ?? "", `Card ${pendingCard.card.label} (${pendingCard.card.last4}) rejected by ${actor}`].filter(Boolean).join("\n"),
     };
   }
   const card = pendingCard.card;
   return {
     ...profile,
+    pendingCards: remainingPending,
     cards: [...profile.cards, card],
     notes: [profile.notes ?? "", `Card ${card.label} (${card.last4}) issued by ${actor}`].filter(Boolean).join("\n"),
   };
