@@ -21,7 +21,7 @@ import { runDueSchedules } from "./banking/bankingTypes";
 import AdminDashboard from "./components/AdminDashboard";
 import { AdminLoginPage, LoginPage, SignupPage } from "./components/AuthPages";
 import BusinessDashboard from "./components/BusinessDashboard";
-import Chatbot from "./components/Chatbot";
+import SupportChat from "./components/SupportChat";
 import Dashboard from "./components/Dashboard";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Footer from "./components/Footer";
@@ -31,6 +31,7 @@ import SearchDialog from "./components/SearchDialog";
 import { AdviceSection, HelpSection, Hero, PromoSection, ServicesSection } from "./components/Sections";
 import SupportPages from "./components/SupportPages";
 import { fetchProfiles, upsertProfile } from "./lib/profileSync";
+import { subscribeToProfileChanges } from "./lib/profileRealtime";
 import { ensureProfileShape, isPersistableProfile } from "./lib/profileNormalize";
 import { mergeSupportThreads } from "./banking/supportChat";
 import { isSupabaseConfigured } from "./lib/supabase";
@@ -271,6 +272,7 @@ export default function App() {
 
     let isMounted = true;
     let intervalId: number | undefined;
+    let realtimeLive = false;
 
     const refreshProfiles = async () => {
       try {
@@ -286,13 +288,41 @@ export default function App() {
       }
     };
 
+    /**
+     * Realtime is the fast path (Support messages, desk replies and admin edits
+     * arrive instantly). The interval is only a safety net, and it backs off once
+     * the channel is live so every open tab stops polling every 15 s.
+     */
+    const schedulePoll = () => {
+      if (intervalId) window.clearInterval(intervalId);
+      intervalId = window.setInterval(
+        () => {
+          void refreshProfiles();
+        },
+        realtimeLive ? 120000 : 15000
+      );
+    };
+
     void refreshProfiles();
-    intervalId = window.setInterval(() => {
-      void refreshProfiles();
-    }, 15000);
+    schedulePoll();
+
+    const unsubscribe = subscribeToProfileChanges({
+      onChange: () => {
+        void refreshProfiles();
+      },
+      onStatus: (status) => {
+        if (!isMounted) return;
+        const wasLive = realtimeLive;
+        realtimeLive = status === "live";
+        if (wasLive !== realtimeLive) schedulePoll();
+        // Catch up on anything that changed while the channel was connecting.
+        if (realtimeLive) void refreshProfiles();
+      },
+    });
 
     return () => {
       isMounted = false;
+      unsubscribe();
       if (intervalId) {
         window.clearInterval(intervalId);
       }
@@ -1036,12 +1066,21 @@ export default function App() {
         dashboardRoute={activeDashboardRoute}
       />
 
-      {!isAuthRoute && (
-        <Chatbot
-          open={chatOpen}
-          onOpen={() => setChatOpen(true)}
-          onClose={() => setChatOpen(false)}
+      {/*
+        One Support widget for the whole app: it replaces the old pair of
+        floating buttons ("Ask a question" + "Support") that overlapped in the
+        bottom-right corner. Signed in it talks to the client's own file and can
+        reach the desk; signed out it answers general questions.
+        The back office keeps using the Support inbox instead, and the sign-in
+        pages stay uncluttered.
+      */}
+      {!isAuthRoute && route.kind !== "admin" && (
+        <SupportChat
+          profile={activeProfile}
+          onUpdateProfile={activeProfileKey ? handleUpdateActiveProfile : undefined}
           onNavigate={navigate}
+          open={chatOpen}
+          onOpenChange={setChatOpen}
         />
       )}
       <SearchDialog

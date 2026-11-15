@@ -186,12 +186,13 @@ export default function SupportPages({ section = "help", onNavigate, onOpenChat 
             <div className="space-y-4 lg:col-span-4">
               <div className="rounded-[6px] bg-white p-6 shadow-sm">
                 <img src={pictoBullesClavardage} alt="" aria-hidden className="h-14 w-14 object-contain" />
-                <h3 className="mt-3 text-[19px] font-bold text-nbc-navy">24/7 Virtual Assistant</h3>
+                <h3 className="mt-3 text-[19px] font-bold text-nbc-navy">24/7 Support chat</h3>
                 <p className="mt-1.5 text-[14px] text-nbc-ink">
-                  Ask instant questions about rates, cards, accounts, or transfers right on this site.
+                  Ask about rates, cards, accounts or transfers right on this site — sign in and we can look
+                  at your own file.
                 </p>
                 <button type="button" onClick={onOpenChat} className="nbc-btn nbc-btn-primary mt-4 w-full">
-                  Open Chat Assistant
+                  Open Support chat
                 </button>
               </div>
 

@@ -7,14 +7,32 @@ desk, plus a back-office inbox with a new-message chime.
 
 | File | Role |
 | --- | --- |
-| `src/components/SupportChat.tsx` | Floating launcher + conversation panel |
+| `src/components/SupportChat.tsx` | The single floating launcher + conversation panel (public site **and** dashboards) |
 | `src/banking/supportChat.ts` | Thread model, append/read/merge helpers, formatting |
+| `src/banking/publicAssistant.ts` | Answers for visitors who are not signed in |
 | `src/banking/bankingTypes.ts` → `SupportMessage` | Stored shape |
+
+### One widget, not two
+
+The old site had two floating buttons stacked in the same corner — the marketing
+"Ask a question" panel (`Chatbot.tsx`, now deleted) and the client **Support**
+chat — so the Support button sat underneath the other one. They are merged:
+
+- `SupportChat` is mounted once, in `App.tsx`, for every route except the sign-in
+  pages and the back office. The dashboards no longer mount their own copy.
+- **Signed out** it answers general questions from `publicAssistant.ts` (rates,
+  appointments, opening an account, card safety, credit cards, sign-in) and
+  offers the same action links the old panel did. Nothing is stored.
+- **Signed in** it is the private Support thread described below, with the
+  unread badge, ticks and desk escalation.
+- Every former entry point — the header menu, the home help card, the help
+  centre card, the footer link — opens this one panel through the `chatOpen`
+  state in `App.tsx`.
 
 Behaviour:
 
-- Floating **Support** button bottom-right on both the personal and business
-  dashboards, with an unread badge for replies.
+- Floating **Support** button bottom-right on every page, with an unread badge
+  for replies (signed in only).
 - Launcher opens a chat panel: header, day separators, bubbles, timestamps,
   read ticks (✓ sent, ✓✓ read), Enter to send, Shift+Enter for a new line,
   Escape to close, quick-start prompts for an empty thread.
@@ -105,8 +123,14 @@ conversation:
 - The thread lives on the client profile (`supportThread`), so it travels with
   the existing `localStorage` mirror and the Supabase `profiles.profile_data`
   sync — no schema change is required.
-- Both dashboards poll profiles every 15 s, so a reply appears on the other side
-  within one poll.
+- **Realtime (default path).** `src/lib/profileRealtime.ts` subscribes to
+  `postgres_changes` on `public.profiles`, so a client message or a desk reply
+  reaches the other side in well under a second. Row changes are coalesced
+  (350 ms) so one write does not trigger several renders.
+  - Requires `supabase/realtime.sql` once per project. Without it the channel
+    reports `offline` and the app behaves exactly as before.
+- **Poll fallback.** Profiles are polled every 15 s while realtime is
+  unavailable and every 120 s once the channel is live (safety net only).
 - `mergeSupportThreads()` unions the server and local copies by message id, so a
   message written on a second device is never lost by last-write-wins.
 - Demo data: the personal profile ships with one Support message and one client
@@ -123,5 +147,24 @@ conversation:
    thread is flagged “Needs reply”, the tab badge shows the count and the chime
    plays if sound is on. The **Assistant briefing** shows the summary, tags and a
    ready-to-send reply. Send it.
-4. Back in the client dashboard the specialist's reply arrives within ~15 s and
-   still reads as **Support**.
+4. Back in the client dashboard the specialist's reply lands immediately (one
+   realtime broadcast, ~1 s) and still reads as **Support**.
+5. Sign out and press the same **Support** button on the marketing site: the
+   panel answers “Today's rates”, “Book an appointment”, “Lost or stolen card”
+   and “Open an account” without needing an account.
+
+## Tests
+
+`npm test` (Vitest, node environment) covers the logic this feature depends on:
+
+| Suite | What it pins down |
+| --- | --- |
+| `src/__tests__/supportAssistant.test.ts` | Every escalation rule, the no-escalation answers, balances quoted from the client's own accounts, no back-office identity in any reply, desk briefing |
+| `src/__tests__/publicAssistant.test.ts` | The signed-out topics and their links, greetings, and that nothing names a bot, model or staff member |
+| `src/__tests__/supportChat.test.ts` | Thread append/read/merge, desk notification gating (`awaitingDesk` only), idempotent read marks, ordering |
+| `src/__tests__/dates.test.ts` | Local-calendar ledger dates (the “history moved by a day” bug) |
+| `src/__tests__/profileNormalize.test.ts` | Partial/legacy profile repair, the write-back guard, ledger sort |
+
+CI (`.github/workflows/ci.yml`) runs typecheck, tests and a production build, and
+fails if a `service_role` key or a committed `.env` reappears
+(`docs/security-hardening.md`).

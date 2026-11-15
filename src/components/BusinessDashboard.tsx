@@ -10,6 +10,8 @@ import {
 import {
   BusinessInvoice,
   BankUserProfile,
+  BankCard,
+  Transaction,
   DEFAULT_PREFERENCES,
   EmployeePayrollItem,
   formatMoney,
@@ -17,7 +19,6 @@ import {
   TRANSFER_FAILURE_REASONS,
 } from "../banking/bankingTypes";
 import { formatIsoDate, todayIso as localTodayIso } from "../lib/dates";
-import SupportChat from "./SupportChat";
 import { sortTransactionsDesc } from "../lib/profileNormalize";
 import { randomDigits, round2 } from "../banking/adminOps";
 import BankCardVisual from "./BankCardVisual";
@@ -1070,7 +1071,7 @@ export default function BusinessDashboard({
     if ((src.category === "chequing" || src.category === "savings") && src.balance < amt) {
       recordFailedTransfer({
         accountId: src.id,
-        description: `Card ${cardTransferType === "from-card" ? "add funds from card" : cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
+        description: `Card ${cardTransferType === "cash" ? "cash advance" : "transfer to card"}`,
         amount: amt,
         reason: "Insufficient funds",
         details: `Card transfer attempted above available balance for ${src.name}.`,
@@ -3721,7 +3722,6 @@ export default function BusinessDashboard({
       )}
 
       {/* Private one-to-one conversation with the Support desk */}
-      <SupportChat profile={profile} onUpdateProfile={onUpdateProfile} />
     </div>
   );
 }

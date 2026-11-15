@@ -13,10 +13,10 @@ const supabaseAnonKey =
   env.SUPABASE_ANON_KEY ??
   undefined;
 
-const supabaseServiceRoleKey =
-  env.VITE_SUPABASE_SERVICE_ROLE_KEY ??
-  env.SUPABASE_SERVICE_ROLE_KEY ??
-  undefined;
+// NOTE: a service-role key must never be read here. This file is bundled into
+// the browser, so anything reached through an `import.meta.env` lookup ends up in
+// public JavaScript. Privileged writes belong in a server function (see
+// docs/security-hardening.md).
 
 export const isSupabaseConfigured = Boolean(
   supabaseUrl && supabaseAnonKey && supabaseUrl.startsWith("http")
@@ -34,10 +34,5 @@ export const supabase = createClient(
     },
   }
 );
-
-// Service-role client — bypasses RLS; used only for admin writes (upsertProfile, etc.)
-export const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
-  ? createClient(supabaseUrl, supabaseServiceRoleKey)
-  : supabase;
 
 export type { Session, User };

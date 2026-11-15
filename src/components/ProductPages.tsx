@@ -295,7 +295,7 @@ export default function ProductPages({ route, onNavigate, onOpenAuth }: Props) {
               { stat: "1859", label: "Founded in Quebec & serving all of Canada" },
               { stat: "2.8M+", label: "Personal & commercial banking clients" },
               { stat: "CDIC", label: "Eligible deposits protected under federal insurance" },
-              { stat: "24/7", label: "Digital banking, fraud monitoring & virtual assistant" },
+              { stat: "24/7", label: "Digital banking, fraud monitoring & Support chat" },
             ].map((s) => (
               <div key={s.stat} className="rounded-[6px] bg-white p-6 shadow-sm">
                 <p className="text-[32px] font-bold text-nbc-red">{s.stat}</p>

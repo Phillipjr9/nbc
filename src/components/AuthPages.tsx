@@ -10,13 +10,7 @@ import {
 } from "../banking/bankingTypes";
 import { ADMIN_ACCOUNTS, AdminIdentity, authenticateAdmin } from "../banking/adminOps";
 import { ArrowRight, LockIcon } from "./icons";
-import {
-  signInWithEmail,
-  signOut,
-  resetPassword as supabaseResetPassword,
-  getSupabaseSession,
-  type AuthState,
-} from "../lib/supabaseAuth";
+import { signInWithEmail, resetPassword as supabaseResetPassword } from "../lib/supabaseAuth";
 import { isSupabaseConfigured } from "../lib/supabase";
 import { fetchProfileByEmail, fetchProfiles } from "../lib/profileSync";
 import { ensureProfileShape } from "../lib/profileNormalize";

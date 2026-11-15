@@ -1,0 +1,52 @@
+name: CI
+
+# Every push to the support/ledger logic and every pull request gets the same
+# gate: types, tests, a production build, and a check that no privileged
+# Supabase key reaches the browser bundle.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+      - name: No privileged key in client code
+        run: |
+          if grep -rn --include='*.ts' --include='*.tsx' -E 'SERVICE_ROLE|service_role' src; then
+            echo "::error::A service-role key must never be referenced from browser code (see docs/security-hardening.md)."
+            exit 1
+          fi
+
+      - name: No committed .env
+        run: |
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo "::error::.env is tracked by git — remove it and rotate the keys."
+            exit 1
+          fi

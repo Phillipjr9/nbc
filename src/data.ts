@@ -367,9 +367,9 @@ export const helpCards = [
   },
   {
     icon: pictoBullesClavardage,
-    title: "Message our virtual assistant",
-    text: "The answers to your questions, all in one step, 24/7.",
-    cta: "Ask a question",
+    title: "Message Support",
+    text: "The answers to your questions, all in one step, 24/7 — with a specialist on call.",
+    cta: "Message Support",
     href: "#chat",
     action: "chat" as const,
   },

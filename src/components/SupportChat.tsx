@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BankUserProfile } from "../banking/bankingTypes";
+import type { BankUserProfile, PageRoute } from "../banking/bankingTypes";
+import { resolveInternalRoute } from "../banking/routeMapper";
 import {
   SUPPORT_BRAND,
   SUPPORT_PRESENCE,
@@ -12,20 +13,51 @@ import {
   unreadSupportCount,
 } from "../banking/supportChat";
 import { generateSupportReply } from "../banking/supportAssistant";
+import {
+  PUBLIC_QUICK_STARTS,
+  answerPublicQuestion,
+  publicGreeting,
+  type PublicLink,
+} from "../banking/publicAssistant";
 import { ArrowRight, CloseIcon } from "./icons";
 
 type Props = {
-  profile: BankUserProfile;
-  onUpdateProfile: (updater: (prev: BankUserProfile) => BankUserProfile) => void;
+  /** The signed-in client, or `null` on the public site. */
+  profile?: BankUserProfile | null;
+  onUpdateProfile?: (updater: (prev: BankUserProfile) => BankUserProfile) => void;
+  onNavigate?: (route: PageRoute) => void;
+  /** Controlled open state (the header, footer and help pages all open this). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   /** Open the conversation immediately (used by deep links and tests). */
   defaultOpen?: boolean;
 };
 
-const quickStarts = [
+const clientQuickStarts = [
   "I have a question about a transaction",
   "My card was declined",
   "I need help with a transfer",
 ];
+
+type GuestMessage = {
+  id: string;
+  side: "client" | "support";
+  body: string;
+  createdAt: string;
+  links?: PublicLink[];
+};
+
+type ChatItem = {
+  id: string;
+  mine: boolean;
+  body: string;
+  createdAt: string;
+  read?: boolean;
+  links?: PublicLink[];
+};
+
+const newId = () => `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const nowIso = () => new Date().toISOString();
 
 function SupportAvatar({ size = 36 }: { size?: number }) {
   return (
@@ -49,31 +81,91 @@ function SupportAvatar({ size = 36 }: { size?: number }) {
 }
 
 /**
- * Customer-facing support conversation.
+ * The single Support conversation surface.
  *
- * Deliberately written from the customer's point of view: the correspondent is
- * always shown as "Support". No administrator name, role, back-office label or
- * internal note is rendered here — see `supportChat.ts` for the same rule on the
- * data side.
+ * It replaces the old pair of floating widgets ("Ask a question" plus
+ * "Support"), which sat on top of each other in the bottom-right corner. There
+ * is now one launcher, one panel and one place to type:
+ *
+ * - **Signed out** — answers general questions (rates, appointments, opening an
+ *   account, card safety) and offers the relevant action links. Nothing is
+ *   stored because there is no profile to store it on.
+ * - **Signed in** — the message is answered from the client's own accounts and
+ *   ledger first, then only escalated to the Support desk when it needs a human
+ *   (see `supportAssistant.ts`). The thread lives on the profile, so it follows
+ *   the client across devices.
+ *
+ * In both modes the correspondent is only ever "Support": no administrator
+ * name, role, back-office label, bot or model is ever rendered or stored.
  */
-export default function SupportChat({ profile, onUpdateProfile, defaultOpen = false }: Props) {
-  const [open, setOpen] = useState(defaultOpen);
+export default function SupportChat({
+  profile = null,
+  onUpdateProfile,
+  onNavigate,
+  open,
+  onOpenChange,
+  defaultOpen = false,
+}: Props) {
+  const [innerOpen, setInnerOpen] = useState(defaultOpen);
+  const isOpen = open ?? innerOpen;
+
+  const setOpen = useCallback(
+    (next: boolean) => {
+      setInnerOpen(next);
+      onOpenChange?.(next);
+    },
+    [onOpenChange]
+  );
+
   const [draft, setDraft] = useState("");
-  const [assistantTyping, setAssistantTyping] = useState(false);
+  const [typing, setTyping] = useState(false);
+  const [guestMessages, setGuestMessages] = useState<GuestMessage[]>([]);
+  const seededGuest = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const timers = useRef<number[]>([]);
 
-  useEffect(() => () => {
-    timers.current.forEach((id) => window.clearTimeout(id));
-    timers.current = [];
-  }, []);
+  useEffect(
+    () => () => {
+      timers.current.forEach((id) => window.clearTimeout(id));
+      timers.current = [];
+    },
+    []
+  );
 
-  const thread = useMemo(() => supportThreadOf(profile), [profile]);
-  const unread = unreadSupportCount(profile, "client");
+  const thread = useMemo(() => (profile ? supportThreadOf(profile) : []), [profile]);
+  const unread = profile ? unreadSupportCount(profile, "client") : 0;
+  const items: ChatItem[] = useMemo(() => {
+    if (profile) {
+      return thread.map((message) => ({
+        id: message.id,
+        mine: message.side === "client",
+        body: message.body,
+        createdAt: message.createdAt,
+        read: message.readBySupport,
+      }));
+    }
+    return guestMessages.map((message) => ({
+      id: message.id,
+      mine: message.side === "client",
+      body: message.body,
+      createdAt: message.createdAt,
+      links: message.links,
+    }));
+  }, [profile, thread, guestMessages]);
+
+  /** Opens the conversation with a greeting for signed-out visitors. */
+  useEffect(() => {
+    if (!isOpen || profile || seededGuest.current) return;
+    seededGuest.current = true;
+    setGuestMessages([
+      { id: "guest-greeting", side: "support", body: publicGreeting(), createdAt: nowIso() },
+    ]);
+  }, [isOpen, profile]);
 
   /** Clears the customer's unread badge once the conversation is on screen. */
   const markRead = useCallback(() => {
+    if (!onUpdateProfile) return;
     onUpdateProfile((prev) => {
       const result = markSupportThreadRead(prev, "client");
       return result.changed ? result.profile : prev;
@@ -81,60 +173,103 @@ export default function SupportChat({ profile, onUpdateProfile, defaultOpen = fa
   }, [onUpdateProfile]);
 
   useEffect(() => {
-    if (open) markRead();
-  }, [open, thread.length, markRead]);
+    if (isOpen && profile) markRead();
+  }, [isOpen, profile, items.length, markRead]);
 
   // Keep the newest message in view.
   useEffect(() => {
-    if (!open) return;
+    if (!isOpen) return;
     const node = listRef.current;
     if (!node) return;
     node.scrollTop = node.scrollHeight;
-  }, [open, thread.length]);
+  }, [isOpen, items.length, typing]);
 
   // Escape closes the panel, like the other overlays in the app.
   useEffect(() => {
-    if (!open) return;
+    if (!isOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open]);
+  }, [isOpen, setOpen]);
+
+  /** Opens an action link from an answer (internal route or in-page anchor). */
+  const followLink = (link: PublicLink) => {
+    setOpen(false);
+    if (link.href.startsWith("#")) {
+      onNavigate?.({ kind: "home" });
+      const target = link.href.slice(1);
+      window.setTimeout(() => {
+        document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 80);
+      return;
+    }
+    onNavigate?.(resolveInternalRoute(link.href, link.label));
+  };
 
   /**
-   * Sends a client message and lets the support assistant answer first.
+   * Sends a message.
    *
-   * The assistant runs before the message reaches a specialist: it replies from
-   * the client's own data, and only marks the message `awaitingDesk` when it
-   * cannot resolve the request. That flag is what raises the badge and the
-   * notification chime in the back office.
+   * Signed in: the support assistant answers first, from the client's own data,
+   * and marks the message `awaitingDesk` only when it cannot resolve it — that
+   * flag is what raises the desk badge and the notification chime.
+   * Signed out: the public answers in `publicAssistant.ts` reply instead.
    */
   const send = (raw?: string) => {
     const body = (raw ?? draft).trim();
-    if (!body) return;
+    if (!body || typing) return;
+
+    if (!profile) {
+      const answer = answerPublicQuestion(body);
+      setGuestMessages((prev) => [
+        ...prev,
+        { id: newId(), side: "client", body, createdAt: nowIso() },
+      ]);
+      setDraft("");
+      setTyping(true);
+
+      const delay = 550 + Math.min(700, body.length * 8);
+      const timer = window.setTimeout(() => {
+        setGuestMessages((prev) => [
+          ...prev,
+          {
+            id: newId(),
+            side: "support",
+            body: answer.reply,
+            links: answer.links,
+            createdAt: nowIso(),
+          },
+        ]);
+        setTyping(false);
+      }, delay);
+      timers.current.push(timer);
+      return;
+    }
+
+    if (!onUpdateProfile) return;
 
     const answer = generateSupportReply(profile, body, thread);
-
     onUpdateProfile((prev) => appendSupportMessage(prev, "client", body, { awaitingDesk: answer.escalate }));
     setDraft("");
-    setAssistantTyping(true);
+    setTyping(true);
 
     // A short "typing" beat keeps the conversation feeling live.
     const delay = 700 + Math.min(900, body.length * 12);
     const timer = window.setTimeout(() => {
       onUpdateProfile((prev) => appendSupportMessage(prev, "support", answer.reply, { automated: true }));
-      setAssistantTyping(false);
+      setTyping(false);
     }, delay);
     timers.current.push(timer);
   };
 
-  const lastSupportMessage = [...thread].reverse().find((message) => message.side === "support");
+  const quickStarts = profile ? clientQuickStarts : PUBLIC_QUICK_STARTS;
+  const presence = profile ? SUPPORT_PRESENCE : "Online · answers 24/7";
 
   return (
     <>
-      {/* Launcher */}
-      {!open && (
+      {/* Launcher — the only floating entry point in the app */}
+      {!isOpen && (
         <button
           type="button"
           onClick={() => {
@@ -157,12 +292,12 @@ export default function SupportChat({ profile, onUpdateProfile, defaultOpen = fa
       )}
 
       {/* Conversation */}
-      {open && (
+      {isOpen && (
         <section
           role="dialog"
           aria-modal="false"
           aria-label={`${SUPPORT_BRAND} conversation`}
-          className="fixed inset-x-0 bottom-0 z-[60] flex h-[86vh] flex-col overflow-hidden rounded-t-[14px] border border-[#e0dcd2] bg-white shadow-[0_18px_50px_rgba(0,49,77,0.3)] sm:inset-x-auto sm:bottom-6 sm:right-6 sm:h-[600px] sm:w-[392px] sm:rounded-[14px]"
+          className="fixed inset-x-0 bottom-0 z-[70] flex h-[86vh] flex-col overflow-hidden rounded-t-[14px] border border-[#e0dcd2] bg-white shadow-[0_18px_50px_rgba(0,49,77,0.3)] sm:inset-x-auto sm:bottom-6 sm:right-6 sm:h-[600px] sm:w-[392px] sm:rounded-[14px]"
         >
           <header className="flex items-center gap-3 bg-nbc-navy px-4 py-3.5 text-white">
             <SupportAvatar size={38} />
@@ -170,7 +305,7 @@ export default function SupportChat({ profile, onUpdateProfile, defaultOpen = fa
               <p className="truncate text-[14.5px] font-bold leading-tight">{SUPPORT_BRAND}</p>
               <p className="mt-0.5 flex items-center gap-1.5 truncate text-[11.5px] text-white/80">
                 <span className="inline-block h-1.5 w-1.5 flex-none rounded-full bg-[#4ade80]" />
-                {SUPPORT_PRESENCE}
+                {presence}
               </p>
             </div>
             <button
@@ -193,9 +328,11 @@ export default function SupportChat({ profile, onUpdateProfile, defaultOpen = fa
               verification codes.
             </p>
 
-            {thread.length === 0 && (
+            {profile && thread.length === 0 && (
               <div className="rounded-[8px] bg-white p-3.5 shadow-sm">
-                <p className="text-[13px] font-semibold text-nbc-navy">Hi {profile.fullName.split(" ")[0]},</p>
+                <p className="text-[13px] font-semibold text-nbc-navy">
+                  Hi {profile.fullName.split(" ")[0]},
+                </p>
                 <p className="mt-1 text-[12.5px] leading-[19px] text-[#565656]">
                   How can we help today? Tell us what is happening and our Support team will take it from
                   there.
@@ -215,47 +352,63 @@ export default function SupportChat({ profile, onUpdateProfile, defaultOpen = fa
               </div>
             )}
 
-            {thread.map((message, index) => {
-              const previous = thread[index - 1];
+            {items.map((item, index) => {
+              const previous = items[index - 1];
               const showDay =
-                !previous || formatSupportDay(previous.createdAt) !== formatSupportDay(message.createdAt);
-              const mine = message.side === "client";
+                !previous || formatSupportDay(previous.createdAt) !== formatSupportDay(item.createdAt);
 
               return (
-                <div key={message.id}>
+                <div key={item.id}>
                   {showDay && (
                     <p className="my-3 text-center text-[10.5px] font-semibold uppercase tracking-[0.08em] text-[#8a8a8a]">
-                      {formatSupportDay(message.createdAt)}
+                      {formatSupportDay(item.createdAt)}
                     </p>
                   )}
-                  <div className={`flex ${mine ? "justify-end" : "justify-start"} gap-2`}>
-                    {!mine && <SupportAvatar size={24} />}
+                  <div className={`flex ${item.mine ? "justify-end" : "justify-start"} gap-2`}>
+                    {!item.mine && <SupportAvatar size={24} />}
                     <div
                       className={`max-w-[78%] rounded-[10px] px-3 py-2 shadow-sm ${
-                        mine
+                        item.mine
                           ? "rounded-br-[3px] bg-[#d9fdd3] text-[#0b2e13]"
                           : "rounded-bl-[3px] bg-white text-[#1a1a1a]"
                       }`}
                     >
-                      {!mine && (
+                      {!item.mine && (
                         <p className="mb-0.5 text-[10.5px] font-bold uppercase tracking-[0.06em] text-nbc-red">
                           {SUPPORT_SHORT_NAME}
                         </p>
                       )}
-                      <p className="whitespace-pre-wrap break-words text-[13px] leading-[19px]">{message.body}</p>
+                      <p className="whitespace-pre-wrap break-words text-[13px] leading-[19px]">{item.body}</p>
+
+                      {item.links && item.links.length > 0 && (
+                        <div className="mt-2 flex flex-col items-start gap-1.5 border-t border-black/10 pt-2">
+                          {item.links.map((link) => (
+                            <button
+                              key={link.label}
+                              type="button"
+                              onClick={() => followLink(link)}
+                              className="inline-flex items-center gap-1.5 text-left text-[12px] font-semibold text-nbc-link hover:underline"
+                            >
+                              {link.label}
+                              <ArrowRight className="h-2.5 w-2.5" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
                       <p
                         className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${
-                          mine ? "text-[#4a7c54]" : "text-[#8a8a8a]"
+                          item.mine ? "text-[#4a7c54]" : "text-[#8a8a8a]"
                         }`}
                       >
-                        <span className="tabular-nums">{formatSupportTime(message.createdAt)}</span>
-                        {mine && (
+                        <span className="tabular-nums">{formatSupportTime(item.createdAt)}</span>
+                        {item.mine && (
                           <span
-                            aria-label={message.readBySupport ? "Read" : "Sent"}
-                            title={message.readBySupport ? "Read" : "Sent"}
-                            className={message.readBySupport ? "text-[#1572C5]" : "text-[#4a7c54]"}
+                            aria-label={item.read ? "Read" : "Sent"}
+                            title={item.read ? "Read" : "Sent"}
+                            className={item.read ? "text-[#1572C5]" : "text-[#4a7c54]"}
                           >
-                            {message.readBySupport ? "✓✓" : "✓"}
+                            {item.read ? "✓✓" : "✓"}
                           </span>
                         )}
                       </p>
@@ -265,7 +418,7 @@ export default function SupportChat({ profile, onUpdateProfile, defaultOpen = fa
               );
             })}
 
-            {assistantTyping && (
+            {typing && (
               <div className="flex items-center gap-2 pl-1" aria-live="polite">
                 <SupportAvatar size={24} />
                 <span className="flex items-center gap-1 rounded-[10px] rounded-bl-[3px] bg-white px-3 py-2 shadow-sm">
@@ -289,6 +442,23 @@ export default function SupportChat({ profile, onUpdateProfile, defaultOpen = fa
             }}
             className="border-t border-[#e7e3d9] bg-white px-3 py-2.5"
           >
+            {/* Signed-out visitors get the topic shortcuts inline; signed-in
+                clients get them in the empty-state card above. */}
+            {!profile && (
+              <div className="nice-scroll mb-2 flex gap-1.5 overflow-x-auto pb-0.5">
+                {quickStarts.map((start) => (
+                  <button
+                    key={start}
+                    type="button"
+                    onClick={() => send(start)}
+                    className="flex-none rounded-full border border-[#d9d4c9] bg-[#fbfaf6] px-2.5 py-1 text-[11.5px] font-medium text-nbc-navy transition hover:border-nbc-red hover:text-nbc-red"
+                  >
+                    {start}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="flex items-end gap-2">
               <textarea
                 ref={inputRef}
@@ -315,9 +485,9 @@ export default function SupportChat({ profile, onUpdateProfile, defaultOpen = fa
               </button>
             </div>
             <p className="mt-1.5 px-1 text-[10.5px] leading-[15px] text-[#8a8a8a]">
-              {lastSupportMessage
+              {profile
                 ? `${SUPPORT_SHORT_NAME} replies instantly and can bring in a specialist at any time. Saved to your profile.`
-                : "Messages are saved to your profile so you can pick up where you left off on any device."}{" "}
+                : `${SUPPORT_SHORT_NAME} answers 24/7. Sign in and we can look at your own file.`}{" "}
               <span className="whitespace-nowrap">Automated assistance may be used.</span>
             </p>
           </form>

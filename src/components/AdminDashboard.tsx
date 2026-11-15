@@ -3,6 +3,7 @@ import { logoNbc } from "../assets/nbcAssets";
 import {
   AdminOps,
   AdminTabId,
+  AdminTransactionInput,
   ROLE_LABEL,
   applyAdminTransaction,
   auditCsv,

@@ -480,7 +480,7 @@ export default function Header({
                   className="flex items-center gap-1.5 hover:text-nbc-red"
                 >
                   <img src={pictoBullesClavardage} alt="" aria-hidden className="h-4 w-4 object-contain" />
-                  Chat with our virtual assistant
+                  Chat with Support
                 </button>
                 <button
                   type="button"
