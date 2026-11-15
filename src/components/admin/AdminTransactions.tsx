@@ -871,24 +871,41 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
               <label className="block text-[13px] font-semibold text-[#121212]">
                 Reversal reason
               </label>
-              <select
-                value={reversalReason}
-                onChange={(e) => setReversalReason(e.target.value)}
-                className="mt-1 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
-              >
-                {REVERSAL_REASONS.map((reason) => (
-                  <option key={reason} value={reason}>{reason}</option>
-                ))}
-              </select>
+              <div className="mt-1 flex gap-2">
+                <select
+                  value={reversalReason}
+                  onChange={(e) => setReversalReason(e.target.value)}
+                  className="flex-1 rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                >
+                  {REVERSAL_REASONS.map((reason) => (
+                    <option key={reason} value={reason}>{reason}</option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  value={customReversalReason}
+                  onChange={(e) => setCustomReversalReason(e.target.value)}
+                  onFocus={() => {
+                    if (!customReversalReason) setCustomReversalReason("");
+                  }}
+                  placeholder="Or type custom reason..."
+                  className="flex-1 min-w-0 rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy placeholder-[#777] truncate"
+                />
+              </div>
+              <p className="mt-1 text-[11px] text-[#777]">
+                Use the dropdown or type a custom reason. Custom text takes priority.
+              </p>
             </div>
 
             <div className="mt-5 flex gap-2">
               <button
                 type="button"
                 onClick={() => {
-                  reverseTx(pendingReversal.userKey, pendingReversal.tx, reversalReason);
+                  const reason = customReversalReason.trim() || reversalReason;
+                  reverseTx(pendingReversal.userKey, pendingReversal.tx, reason);
                   setPendingReversal(null);
                   setReversalReason(REVERSAL_REASONS[0]);
+                  setCustomReversalReason("");
                 }}
                 className="flex-1 rounded-[6px] bg-nbc-red py-2.5 text-[13px] font-semibold text-white hover:bg-nbc-red-dark"
               >
