@@ -1032,15 +1032,20 @@ export function applyCardApprovalDecision(
   decision: "approved" | "rejected",
   actor: string
 ): BankUserProfile {
+  const remainingPending = (profile.pendingCards ?? []).filter(
+    (pc) => pc.approvalRequestId !== pendingCard.approvalRequestId
+  );
   if (decision === "rejected") {
     return {
       ...profile,
+      pendingCards: remainingPending,
       notes: [profile.notes ?? "", `Card ${pendingCard.card.label} (${pendingCard.card.last4}) rejected by ${actor}`].filter(Boolean).join("\n"),
     };
   }
   const card = pendingCard.card;
   return {
     ...profile,
+    pendingCards: remainingPending,
     cards: [...profile.cards, card],
     notes: [profile.notes ?? "", `Card ${card.label} (${card.last4}) issued by ${actor}`].filter(Boolean).join("\n"),
   };
