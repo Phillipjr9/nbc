@@ -42,7 +42,15 @@ import {
   isActionablePatch,
   mergeSupportThreads,
 } from "./banking/supportChat";
-import { applySupportThreadRemote, type SupportThreadState } from "./lib/supportRemote";
+import {
+  applySupportThreadRemote,
+  diffSupportDigest,
+  fetchSupportDigest,
+  fetchSupportThreads,
+  type SupportDigest,
+  type SupportThreadSnapshot,
+  type SupportThreadState,
+} from "./lib/supportRemote";
 import { stableStringify } from "./lib/stableStringify";
 import { isSupabaseConfigured } from "./lib/supabase";
 
@@ -356,6 +364,76 @@ export default function App() {
       } else {
         serverSigRef.current.delete(remote.email.toLowerCase());
       }
+    }
+  };
+
+  /**
+   * The last `email, updated_at` digest seen for the conversations, so the poll
+   * below can tell "nothing happened" from "download this thread".
+   */
+  const supportDigestRef = useRef<SupportDigest | null>(null);
+
+  /**
+   * Adopts conversations that came back from the thread poll.
+   *
+   * Only the thread is touched: messages are unioned by id, so nothing this
+   * device already holds is lost. When the server turns out to have every
+   * message we have, the result is marked as already saved (no write); when it
+   * does not, the marker is cleared so exactly one repair write goes out. This
+   * is the same rule `applyRemoteProfiles` uses, and it is what stops a poll
+   * from turning one missing message into a save loop.
+   */
+  const applyRemoteThreads = (snapshots: SupportThreadSnapshot[]) => {
+    if (snapshots.length === 0) return;
+
+    const byEmail = new Map(snapshots.map((snapshot) => [snapshot.email.toLowerCase(), snapshot]));
+
+    const mergeOne = (profile: BankUserProfile): BankUserProfile => {
+      const snapshot = byEmail.get(profile.email.toLowerCase());
+      if (!snapshot) return profile;
+
+      const thread = mergeSupportThreads(snapshot.thread, profile.supportThread);
+      const handoff = snapshot.handoff && profile.supportHandoff !== true;
+      if (!handoff && stableStringify(thread) === stableStringify(profile.supportThread ?? [])) {
+        return profile;
+      }
+      return ensureProfileShape({
+        ...profile,
+        supportThread: thread,
+        ...(snapshot.handoff ? { supportHandoff: true } : {}),
+      });
+    };
+
+    const nextBuiltIn = { ...profilesRef.current };
+    let touchedBuiltIn = false;
+    for (const key of ["personal", "business", "wealth"] as const) {
+      const current = nextBuiltIn[key];
+      if (!current) continue;
+      const updated = mergeOne(current);
+      if (updated !== current) {
+        nextBuiltIn[key] = updated;
+        touchedBuiltIn = true;
+      }
+    }
+    if (touchedBuiltIn) {
+      profilesRef.current = nextBuiltIn;
+      setProfiles(nextBuiltIn);
+    }
+
+    const currentCustom = customProfilesRef.current;
+    const nextCustom = currentCustom.map((profile) => mergeOne(profile));
+    if (nextCustom.some((profile, index) => profile !== currentCustom[index])) {
+      customProfilesRef.current = nextCustom;
+      setCustomProfiles(nextCustom);
+    }
+
+    for (const snapshot of snapshots) {
+      const merged = findProfileByEmail(profilesRef.current, customProfilesRef.current, snapshot.email);
+      if (!merged) continue;
+      const serverIds = new Set(snapshot.thread.map((message) => message.id));
+      const allOnServer = (merged.supportThread ?? []).every((message) => serverIds.has(message.id));
+      if (allOnServer) rememberServerProfile(merged);
+      else serverSigRef.current.delete(snapshot.email.toLowerCase());
     }
   };
 
@@ -673,28 +751,96 @@ export default function App() {
   }, [activeProfile]);
 
   /**
-   * Keeps the open Support conversation fresh even when the realtime socket is
-   * unhealthy: one row, every 4 s, only while the client is in the chat.
+   * The conversation's own heartbeat — the reason a reply no longer takes half a
+   * minute to arrive.
+   *
+   * Realtime is the fast path (usually well under a second), but it is a websocket:
+   * a phone that went to sleep, a network that blocks the socket, or a channel that
+   * was dropped and reconnected without replaying its events all left the client
+   * and the desk waiting for the 30 s full-table poll.
+   *
+   * So while a conversation can actually be happening — the client has the Support
+   * panel open, or the desk has the console open — both sides ask for a digest of
+   * `email, updated_at` (a few hundred bytes) and download only the thread that
+   * moved, not the whole profile. A line therefore lands in about a second even if
+   * Realtime is completely down.
    */
   useEffect(() => {
-    if (!chatOpen || !isSupabaseConfigured) return;
-    const email = activeProfile?.email;
-    if (!email) return;
+    if (!isSupabaseConfigured) return;
+
+    const deskIsOpen = route.kind === "admin" && adminAuth && Boolean(adminIdentity);
+    const clientEmail = activeProfile?.email ?? "";
+    if (!deskIsOpen && !clientEmail) return;
+
+    // The desk watches every conversation (its inbox is a list); a client
+    // watches only their own — fast while the panel is open, slowly enough to
+    // keep the unread badge honest when it is closed.
+    const scope = deskIsOpen ? undefined : [clientEmail];
+    const periodMs = deskIsOpen ? 2000 : chatOpen ? 1200 : 15000;
 
     let cancelled = false;
-    const id = window.setInterval(() => {
-      void (async () => {
-        const profile = await fetchProfileByEmail(email);
-        if (cancelled || !profile) return;
-        applyRemoteProfiles([profile]);
-      })();
-    }, 4000);
+    let timer: number | undefined;
+    let primed = false;
+
+    const schedule = (delay: number) => {
+      if (cancelled) return;
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void tick(), delay);
+    };
+
+    const tick = async () => {
+      if (cancelled) return;
+
+      // Nobody is looking: do not spend requests on a background tab.
+      if (document.hidden) {
+        schedule(periodMs);
+        return;
+      }
+
+      if (!primed && scope && chatOpen) {
+        // Opening the panel is the moment the client wants to be sure the
+        // conversation is current — read it once, immediately.
+        primed = true;
+        const snapshots = await fetchSupportThreads(scope);
+        if (cancelled) return;
+        applyRemoteThreads(snapshots);
+      }
+      primed = true;
+
+      const digest = await fetchSupportDigest(scope);
+      if (cancelled) return;
+
+      if (digest) {
+        const changed = diffSupportDigest(supportDigestRef.current, digest);
+        supportDigestRef.current = digest;
+        if (changed.length > 0) {
+          const snapshots = await fetchSupportThreads(changed);
+          if (cancelled) return;
+          applyRemoteThreads(snapshots);
+        }
+      }
+      schedule(periodMs);
+    };
+
+    // Returning to the tab or coming back online is exactly when events were
+    // missed: look at once instead of waiting for the next tick.
+    const kick = () => {
+      if (!document.hidden) schedule(0);
+    };
+    document.addEventListener("visibilitychange", kick);
+    window.addEventListener("focus", kick);
+    window.addEventListener("online", kick);
+
+    void tick();
 
     return () => {
       cancelled = true;
-      window.clearInterval(id);
+      if (timer) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", kick);
+      window.removeEventListener("focus", kick);
+      window.removeEventListener("online", kick);
     };
-  }, [chatOpen, activeProfile?.email]);
+  }, [chatOpen, activeProfile?.email, route.kind, adminAuth, adminIdentity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeDashboardRoute: PageRoute = useMemo(() => {
     if (activeProfile && isBusinessProfile(activeProfile)) {
