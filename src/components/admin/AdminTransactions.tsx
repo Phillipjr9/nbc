@@ -875,7 +875,7 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
                 <select
                   value={reversalReason}
                   onChange={(e) => setReversalReason(e.target.value)}
-                  className="flex-1 rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                  className="flex-[2] rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
                 >
                   {REVERSAL_REASONS.map((reason) => (
                     <option key={reason} value={reason}>{reason}</option>
@@ -885,15 +885,12 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
                   type="text"
                   value={customReversalReason}
                   onChange={(e) => setCustomReversalReason(e.target.value)}
-                  onFocus={() => {
-                    if (!customReversalReason) setCustomReversalReason("");
-                  }}
-                  placeholder="Or type custom reason..."
-                  className="flex-1 min-w-0 rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy placeholder-[#777] truncate"
+                  placeholder="Type custom reason..."
+                  className="flex-[3] min-w-0 rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy placeholder-[#999]"
                 />
               </div>
               <p className="mt-1 text-[11px] text-[#777]">
-                Use the dropdown or type a custom reason. Custom text takes priority.
+                Type a custom reason above, or pick from the dropdown. Custom text is used if filled in.
               </p>
             </div>
 
