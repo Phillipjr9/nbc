@@ -516,6 +516,11 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
           </button>
 
           {(() => {
+            const fromDateValid = genFrom.trim().length === 10 && !isNaN(new Date(genFrom).getTime());
+            const toDateValid = genTo.trim().length === 10 && !isNaN(new Date(genTo).getTime());
+            const fromAfterTo = fromDateValid && toDateValid && genFrom > genTo;
+            const minMaxZero = (Number(genMin) || 0) === 0 && (Number(genMax) || 0) === 0;
+
             const previewInput: GeneratorInput = {
               fromDate: genFrom,
               toDate: genTo,
@@ -532,6 +537,15 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
             const preview = generateTransactionSeries(previewInput, genSeed);
             const net = Math.round(preview.reduce((t, x) => t + x.amount, 0) * 100) / 100;
             const capped = preview.length >= MAX_GENERATED_ENTRIES;
+            const emptyReason = !preview.length
+              ? fromAfterTo
+                ? "From date is after to date — swap them."
+                : !fromDateValid || !toDateValid
+                  ? "One or both dates are invalid."
+                  : minMaxZero
+                    ? "Min and max amounts are both zero — set a non-zero max."
+                    : "No entries fit in this date range — try a wider range or lower frequency."
+              : "";
             return (
               <div className="rounded-[6px] bg-[#faf8f3] p-3 text-[12px] leading-[18px] lg:col-span-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -545,7 +559,7 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
                 <p className="mt-1 text-[#565656]">
                   {preview.length > 0
                     ? `First ${preview[0].date} · last ${preview[preview.length - 1].date}`
-                    : "No entries inside this range."}
+                    : emptyReason}
                   {genStatus === "Pending" || !genApplyBalance
                     ? " Entries will be recorded without changing the balance."
                     : ""}
