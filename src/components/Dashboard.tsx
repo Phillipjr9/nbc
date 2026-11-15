@@ -94,7 +94,7 @@ export default function Dashboard({
   const prefs: ClientPreferences = { ...DEFAULT_PREFERENCES, ...(profile.preferences ?? {}) };
 
   // Transfers & payments sub-navigation
-  const [moveMode, setMoveMode] = useState<"internal" | "card" | "etransfer" | "bills" | "deposit">("internal");
+  const [moveMode, setMoveMode] = useState<"internal" | "card" | "etransfer" | "bills" | "deposit" | "link-card">("internal");
 
   const sourceAccounts = useMemo(
     () => profile.accounts.filter((a) => a.category === "chequing" || a.category === "savings"),
@@ -135,6 +135,10 @@ export default function Dashboard({
   const [cardAmt, setCardAmt] = useState("250.00");
   const [cardMemo, setCardMemo] = useState("");
   const [linkedAccountId, setLinkedAccountId] = useState("");
+
+  // Link card mode state
+  const [linkCardSelectedId, setLinkCardSelectedId] = useState("");
+  const [linkCardAccountId, setLinkCardAccountId] = useState("");
 
   // Scheduled / recurring transfers
   const [schFromId, setSchFromId] = useState(sourceAccounts[0]?.id ?? "");
@@ -523,8 +527,12 @@ export default function Dashboard({
     const linked = card ? profile.accounts.find((a) => a.id === card.linkedAccountId) : undefined;
     const targetAccount = profile.accounts.find((a) => a.id === cardSourceId) ?? sourceAccounts[0];
 
-    if (!card || !linked) {
-      notify("Link a card to your profile first to transfer funds.");
+    if (!card) {
+      notify("No card selected. Choose a card to transfer funds.");
+      return;
+    }
+    if (!linked) {
+      notify(`${card.label} is not linked to any account yet. Use the "Link card to account" section above to link it first.`);
       return;
     }
 
@@ -1406,6 +1414,16 @@ export default function Dashboard({
                             <p className="break-words text-[13px] font-medium leading-[18px] text-[#121212]">
                               {tx.description}
                             </p>
+                            {tx.failureReason && (
+                              <p className="mt-0.5 truncate text-[11px] font-semibold text-[#b91c1c] bg-rose-50 px-1.5 py-0.5 rounded">
+                                Reversal reason: {tx.failureReason}
+                              </p>
+                            )}
+                            {tx.failureDetails && !tx.failureReason && (
+                              <p className="mt-0.5 truncate text-[11px] text-[#b91c1c]">
+                                {tx.failureDetails}
+                              </p>
+                            )}
                             <p className="mt-0.5 truncate text-[11.5px] text-[#666]">
                               <span className="tabular-nums">{tx.date}</span> · {acc?.name ?? tx.accountId}
                             </p>
@@ -1753,6 +1771,16 @@ export default function Dashboard({
                             <p className="break-words text-[13px] font-medium leading-[18px] text-[#121212]">
                               {tx.description}
                             </p>
+                            {tx.failureReason && (
+                              <p className="mt-0.5 truncate text-[11px] font-semibold text-[#b91c1c] bg-rose-50 px-1.5 py-0.5 rounded">
+                                Reversal reason: {tx.failureReason}
+                              </p>
+                            )}
+                            {tx.failureDetails && !tx.failureReason && (
+                              <p className="mt-0.5 truncate text-[11px] text-[#b91c1c]">
+                                {tx.failureDetails}
+                              </p>
+                            )}
                             <p className="mt-0.5 truncate text-[11.5px] text-[#666]">
                               <span className="tabular-nums">{tx.date}</span> · {tx.category} · {acc?.name ?? tx.accountId}
                             </p>
@@ -1814,6 +1842,16 @@ export default function Dashboard({
                               <span className="ml-2 text-[12px] font-normal text-[#777]">
                                 · {tx.category}
                               </span>
+                              {tx.failureReason && (
+                                <span className="mt-1 block text-[11px] font-semibold text-[#b91c1c] bg-rose-50 px-1.5 py-0.5 rounded sm:inline-block">
+                                  Reversal reason: {tx.failureReason}
+                                </span>
+                              )}
+                              {tx.failureDetails && !tx.failureReason && (
+                                <span className="mt-1 block text-[11px] text-[#b91c1c] sm:inline-block">
+                                  {tx.failureDetails}
+                                </span>
+                              )}
                               <span className="mt-0.5 block text-[12px] font-normal text-[#777] md:hidden">
                                 {acc?.name ?? tx.accountId}
                               </span>
@@ -1876,6 +1914,7 @@ export default function Dashboard({
               {(
                 [
                   ["internal", "Between my accounts"],
+                  ["link-card", "Link a card"],
                   ["card", "Card transfer"],
                   ["etransfer", "Interac e-Transfer®"],
                   ["bills", "Pay a bill"],
@@ -1896,6 +1935,92 @@ export default function Dashboard({
                 </button>
               ))}
             </div>
+
+            {moveMode === "link-card" && (
+              <div className="max-w-[720px] space-y-5 rounded-[6px] border border-[#e5e2da] bg-white p-6">
+                <div>
+                  <h2 className="text-[20px] font-bold text-nbc-navy">Link a card to your account</h2>
+                  <p className="mt-1 text-[14px] text-[#565656]">
+                    Connect a card to one of your accounts so you can transfer funds and manage spending.
+                  </p>
+                </div>
+
+                {profile.cards.length === 0 ? (
+                  <div className="rounded-[6px] border border-dashed border-[#b9b2a3] bg-[#fcfbf8] p-6 text-center">
+                    <p className="text-[14px] text-[#565656]">No cards on file.</p>
+                    <p className="mt-1 text-[13px] text-[#777]">Cards appear here once they are issued to your profile.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {/* Card selection */}
+                    <div>
+                      <label htmlFor="link-card-select" className="block text-[13px] font-semibold text-[#121212]">
+                        Select a card
+                      </label>
+                      <select
+                        id="link-card-select"
+                        value={linkCardSelectedId}
+                        onChange={(e) => setLinkCardSelectedId(e.target.value)}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                      >
+                        {profile.cards.map((card) => (
+                          <option key={card.id} value={card.id}>
+                            {card.label} · ending ${card.last4} {card.linkedAccountId ? ` (linked to ${profile.accounts.find((a) => a.id === card.linkedAccountId)?.name ?? card.linkedAccountId})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Account selection */}
+                    <div>
+                      <label htmlFor="link-acct-select" className="block text-[13px] font-semibold text-[#121212]">
+                        Select an account to link
+                      </label>
+                      <select
+                        id="link-acct-select"
+                        value={linkCardAccountId}
+                        onChange={(e) => setLinkCardAccountId(e.target.value)}
+                        className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
+                      >
+                        <option value="">— Select account —</option>
+                        {profile.accounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name} ({formatMoney(account.balance, account.currency)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Link button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const card = profile.cards.find((c) => c.id === linkCardSelectedId) ?? profile.cards[0];
+                        if (linkCardAccountId) {
+                          linkCardToAccount(card.id, linkCardAccountId);
+                          setLinkCardSelectedId("");
+                          setLinkCardAccountId("");
+                          notify(`Card linked to account.`);
+                        } else {
+                          notify("Please select an account to link.");
+                        }
+                      }}
+                      disabled={!linkCardAccountId}
+                      className="nbc-btn nbc-btn-primary disabled:opacity-50 w-full"
+                    >
+                      Link card to account
+                    </button>
+
+                    {/* Confirmation message */}
+                    {linkCardAccountId && profile.cards.find((c) => c.id === linkCardSelectedId)?.linkedAccountId === linkCardAccountId && (
+                      <div className="rounded-[6px] border border-[#017a33] bg-[#f0f9f0] p-4 text-center">
+                        <p className="text-[14px] font-semibold text-[#017a33]">Card is already linked to this account</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {moveMode === "card" && (
               <form onSubmit={handleCardTransfer} className="max-w-[720px] space-y-5 rounded-[6px] border border-[#e5e2da] bg-white p-6">
@@ -1943,7 +2068,7 @@ export default function Dashboard({
 
                 <div>
                   <label htmlFor="card-select" className="block text-[13px] font-semibold text-[#121212]">
-                    Linked card
+                    Select a card
                   </label>
                   <select
                     id="card-select"
@@ -1951,11 +2076,15 @@ export default function Dashboard({
                     onChange={(e) => setCardId(e.target.value)}
                     className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
                   >
-                    {profile.cards.map((card) => (
-                      <option key={card.id} value={card.id}>
-                        {card.label} · {card.number ?? `•••• ${card.last4}`}
-                      </option>
-                    ))}
+                    {profile.cards.length === 0 ? (
+                      <option value="">— No cards on file —</option>
+                    ) : (
+                      profile.cards.map((card) => (
+                        <option key={card.id} value={card.id}>
+                          {card.label} · {card.number ?? `•••• ${card.last4}`} {card.linkedAccountId ? `(linked to ${profile.accounts.find((a) => a.id === card.linkedAccountId)?.name ?? card.linkedAccountId})` : "(not linked)"}
+                        </option>
+                      ))
+                    )}
                   </select>
                   {profile.cards.length > 0 && (
                     <div className="mt-2 space-y-2">
@@ -1987,6 +2116,11 @@ export default function Dashboard({
                         Link card to account
                       </button>
                     </div>
+                  )}
+                  {profile.cards.length === 0 && (
+                    <p className="mt-2 text-[12px] text-[#b91c1c]">
+                      No cards on file. Switch to "Link a card" above to connect a card to your profile first.
+                    </p>
                   )}
                 </div>
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AuditLogEntry,
   BankUserProfile,
@@ -101,19 +101,97 @@ const sanitizeCustomProfiles = (profiles: BankUserProfile[] = []): BankUserProfi
       cards: normalizeBankCardList(profile.cards),
     }));
 
+/** Merge remote profiles into the built-in profiles Record (personal/business/wealth).
+ * Built-in profiles are identified by their `id` matching the key ("personal", "business", "wealth").
+ * Local changes take priority; new remote entries (e.g. reversals) are merged in. */
+const mergeRemoteProfilesIntoBuiltIn = (
+  local: Record<"personal" | "business" | "wealth", BankUserProfile>,
+  remote: BankUserProfile[]
+): Record<"personal" | "business" | "wealth", BankUserProfile> => {
+  const result = { ...local };
+  for (const rp of remote) {
+    // Only merge demo profiles (empty email) into built-ins.
+    // User profiles (with email) belong in customProfiles, keyed by email —
+    // they must not overwrite the shared built-in personal/business/wealth slots.
+    if (!normalizeCredentialString(rp.email)) {
+      const key = rp.id === "personal" || rp.id === "business" || rp.id === "wealth"
+        ? (rp.id as "personal" | "business" | "wealth")
+        : null;
+      if (!key || !result[key]) continue;
+      const current = result[key];
+      // Remote is the source of truth: start with local to preserve shape,
+      // then overlay remote values so admin changes propagate to the user's view.
+      result[key] = {
+        ...current,
+        ...rp,
+        email: normalizeCredentialString(rp.email) || normalizeCredentialString(current.email) || "",
+        fullName: rp.fullName || current.fullName || "",
+        roleLabel: rp.roleLabel || current.roleLabel || "Personal Banking",
+        accountKind: rp.accountKind || current.accountKind || (rp.id === "custom" ? undefined : rp.id) || "personal",
+        status: rp.status || current.status || "active",
+        memberSince: rp.memberSince || current.memberSince || "",
+        branchName: rp.branchName || current.branchName || "",
+        advisorName: rp.advisorName || current.advisorName || "",
+        password: normalizeCredentialString(rp.password) || normalizeCredentialString(current.password) || "",
+        pin: normalizeCredentialString(rp.pin) || normalizeCredentialString(current.pin) || "1988",
+        address: rp.address || current.address || "",
+        city: rp.city || current.city || "",
+        province: rp.province || current.province || "",
+        postalCode: rp.postalCode || current.postalCode || "",
+        dateOfBirth: rp.dateOfBirth || current.dateOfBirth || "",
+        sin: rp.sin || current.sin || "",
+        businessNumber: rp.businessNumber || current.businessNumber || "",
+        notes: rp.notes || current.notes || "",
+        // Remote arrays are the source of truth — admin deletions/modifications propagate.
+        goals: rp.goals ?? current.goals,
+        payees: rp.payees ?? current.payees,
+        recipients: rp.recipients ?? current.recipients,
+        cards: rp.cards ? normalizeBankCardList(rp.cards) : current.cards,
+        transactions: rp.transactions ?? current.transactions,
+        accounts: rp.accounts ?? current.accounts,
+      };
+    }
+  }
+  return result;
+};
+
 const mergeRemoteProfiles = (existing: BankUserProfile[], remote: BankUserProfile[]): BankUserProfile[] => {
   const merged = sanitizeCustomProfiles(existing);
 
   for (const profile of sanitizeCustomProfiles(remote)) {
     const index = merged.findIndex((entry) => entry.email.toLowerCase() === profile.email.toLowerCase());
     if (index >= 0) {
+      // Remote is the source of truth: admin changes propagate to the user's view.
+      // Start with local to preserve shape, then overlay remote values.
+      const local = merged[index];
       merged[index] = {
-        ...merged[index],
+        ...local,
         ...profile,
-        email: normalizeCredentialString(profile.email) || merged[index].email,
-        password: normalizeCredentialString(profile.password) || merged[index].password,
-        pin: normalizeCredentialString(profile.pin) || merged[index].pin || "1988",
-        cards: normalizeBankCardList(profile.cards ?? merged[index].cards ?? []),
+        email: normalizeCredentialString(profile.email) || normalizeCredentialString(local.email) || "",
+        fullName: profile.fullName || local.fullName || "",
+        roleLabel: profile.roleLabel || local.roleLabel || "Personal Banking",
+        accountKind: profile.accountKind || local.accountKind || (profile.id === "custom" ? undefined : profile.id) || "personal",
+        status: profile.status || local.status || "active",
+        memberSince: profile.memberSince || local.memberSince || "",
+        branchName: profile.branchName || local.branchName || "",
+        advisorName: profile.advisorName || local.advisorName || "",
+        password: normalizeCredentialString(profile.password) || normalizeCredentialString(local.password) || "",
+        pin: normalizeCredentialString(profile.pin) || normalizeCredentialString(local.pin) || "1988",
+        address: profile.address || local.address || "",
+        city: profile.city || local.city || "",
+        province: profile.province || local.province || "",
+        postalCode: profile.postalCode || local.postalCode || "",
+        dateOfBirth: profile.dateOfBirth || local.dateOfBirth || "",
+        sin: profile.sin || local.sin || "",
+        businessNumber: profile.businessNumber || local.businessNumber || "",
+        notes: profile.notes || local.notes || "",
+        // Remote arrays are the source of truth — admin deletions/modifications propagate.
+        goals: profile.goals ?? local.goals,
+        payees: profile.payees ?? local.payees,
+        recipients: profile.recipients ?? local.recipients,
+        cards: profile.cards ? normalizeBankCardList(profile.cards) : local.cards,
+        transactions: profile.transactions ?? local.transactions,
+        accounts: profile.accounts ?? local.accounts,
       };
     } else {
       merged.push({
@@ -146,6 +224,12 @@ export default function App() {
     const stored = loadStored<BankUserProfile[]>(STORAGE_CUSTOM_KEY, []);
     return sanitizeCustomProfiles(Array.isArray(stored) ? stored : []);
   });
+  // Refs to always-accessible latest state for the async sync loop.
+  const profilesRef = useRef(profiles);
+  const customProfilesRef = useRef(customProfiles);
+  useEffect(() => { profilesRef.current = profiles; }, [profiles]);
+  useEffect(() => { customProfilesRef.current = customProfiles; }, [customProfiles]);
+
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
@@ -157,7 +241,10 @@ export default function App() {
         const remoteProfiles = await fetchProfiles();
         if (!isMounted) return;
 
-        setCustomProfiles((prev) => mergeRemoteProfiles(prev, remoteProfiles));
+        const nextCustom = mergeRemoteProfiles(customProfilesRef.current, remoteProfiles);
+        const nextBuiltIn = mergeRemoteProfilesIntoBuiltIn(profilesRef.current, remoteProfiles);
+        setCustomProfiles(nextCustom);
+        setProfiles(nextBuiltIn);
       } catch (error) {
         console.warn("Supabase profile sync skipped:", error);
       }
@@ -184,7 +271,7 @@ export default function App() {
   const [cookieConsent, setCookieConsent] = useState<boolean>(() => {
     const localConsent = loadStored<boolean | null>(STORAGE_COOKIE_CONSENT_KEY, null);
     const cookieConsentValue = readCookie(STORAGE_COOKIE_CONSENT_KEY);
-    return localConsent ?? cookieConsentValue === "accepted" ?? false;
+    return localConsent ?? cookieConsentValue === "accepted";
   });
   const [adminAuth, setAdminAuth] = useState<boolean>(() =>
     loadStored<boolean>(STORAGE_ADMIN_AUTH_KEY, false)
@@ -403,14 +490,27 @@ export default function App() {
     });
 
     if (key === "personal" || key === "business" || key === "wealth") {
-      setProfiles((prev) => ({
-        ...prev,
-        [key]: normalizeProfile(updater(prev[key])),
-      }));
+      setProfiles((prev) => {
+        const next = normalizeProfile(updater(prev[key]));
+        // Persist to Supabase so remote sync cannot overwrite admin changes.
+        // Fire-and-forget: the 15s sync loop will retry if this write fails.
+        if (isSupabaseConfigured) {
+          upsertProfile(next).catch((err) => console.warn("Supabase profile upsert failed:", err));
+        }
+        return { ...prev, [key]: next };
+      });
     } else {
-      setCustomProfiles((prev) =>
-        prev.map((cp) => (cp.email.toLowerCase() === key.toLowerCase() ? normalizeProfile(updater(cp)) : cp))
-      );
+      setCustomProfiles((prev) => {
+        const next = prev.map((cp) =>
+          cp.email.toLowerCase() === key.toLowerCase() ? normalizeProfile(updater(cp)) : cp
+        );
+        // Persist to Supabase so remote sync cannot overwrite admin changes.
+        const updated = next.find((cp) => cp.email.toLowerCase() === key.toLowerCase());
+        if (isSupabaseConfigured && updated) {
+          upsertProfile(updated).catch((err) => console.warn("Supabase profile upsert failed:", err));
+        }
+        return next;
+      });
     }
     if (logAction && logDetail) {
       appendAudit(logAction, logDetail, severity);

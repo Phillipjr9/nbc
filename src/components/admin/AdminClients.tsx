@@ -442,7 +442,7 @@ export default function AdminClients({ ops, selectedKey, onSelectKey, onOpenTab,
             <Field label="Full name"><input name="fullName" className={inputCls} defaultValue={editing.profile.fullName} /></Field>
             <Field label="Email"><input name="email" type="email" className={inputCls} defaultValue={editing.profile.email} /></Field>
             <Field label="Reset password">
-              <input name="password" className={inputCls} defaultValue="" placeholder="Leave blank to keep current" autoComplete="new-password" />
+              <input name="password" className={inputCls} defaultValue={editing.profile.password} placeholder="Leave blank to keep current" autoComplete="new-password" />
             </Field>
             <Field label="Phone"><input name="phone" className={inputCls} defaultValue={editing.profile.phone ?? ""} /></Field>
             <Field label="Street address"><input name="address" className={inputCls} defaultValue={editing.profile.address ?? ""} /></Field>
@@ -684,7 +684,7 @@ function SelectedClientDetails({
         </DetailBlock>
         <DetailBlock title="Access & notes">
           <p>Status: {p.status ?? "active"}</p>
-          <p>Password: {p.password ? "Set" : "Not set"}</p>
+          <p>Password: {p.password ? p.password : "Not set"}</p>
           <p className="mt-1 italic text-[#666]">{p.notes || "No internal notes."}</p>
         </DetailBlock>
       </div>

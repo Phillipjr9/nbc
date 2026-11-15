@@ -4,13 +4,17 @@ import {
   AdminOps,
   AdminTabId,
   ROLE_LABEL,
+  applyAdminTransaction,
   auditCsv,
   can,
   downloadFile,
+  freezeCard,
+  maskSin,
   nowStamp,
+  statementCsv,
   todayIso,
 } from "../banking/adminOps";
-import { AuditLogEntry, GlobalBankConfig, formatMoney } from "../banking/bankingTypes";
+import { AuditLogEntry, BankUserProfile, GlobalBankConfig, Transaction, TRANSFER_FAILURE_REASONS, formatMoney } from "../banking/bankingTypes";
 import AdminAccounts from "./admin/AdminAccounts";
 import AdminApprovals from "./admin/AdminApprovals";
 import AdminClients from "./admin/AdminClients";
@@ -83,10 +87,13 @@ export default function AdminDashboard({
   onSignOut,
 }: Props) {
   const [tab, setTab] = useState<AdminTabId | "analytics" | "search" | "roles">("overview");
+  // When a client is selected, their own tabs (overview/transactions/accounts/cards)
+  // replace the global tabs so each client sees only their own data.
+  const [clientTab, setClientTab] = useState<"overview" | "transactions" | "accounts" | "cards" | null>(null);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [tab]);
+  }, [tab, clientTab]);
 
   const [selectedKey, setSelectedKey] = useState(users[0]?.key ?? "personal");
   const [toast, setToast] = useState<string | null>(null);
@@ -128,7 +135,13 @@ export default function AdminDashboard({
     onSelectKey: setSelectedKey,
     onOpenTab: (next: AdminTabId, key?: string) => {
       if (key) setSelectedKey(key);
-      setTab(next);
+      // Client-specific tabs show only that client's data
+      if (next === "transactions" || next === "accounts" || next === "cards") {
+        setClientTab(next);
+      } else {
+        setClientTab(null);
+        setTab(next);
+      }
     },
   };
 
@@ -406,10 +419,22 @@ export default function AdminDashboard({
           </div>
         )}
 
+        {/* Client detail view: when a client is selected, show their own tabs */}
+        {clientTab && selectedKey && (
+          <ClientDetailView
+            key={selectedKey}
+            clientKey={selectedKey}
+            clientTab={clientTab}
+            setClientTab={setClientTab}
+            onBack={() => setClientTab(null)}
+            {...panelProps}
+          />
+        )}
+
         {tab === "clients" && <AdminClients {...panelProps} autoCreate={createRequest} />}
-        {tab === "accounts" && <AdminAccounts {...panelProps} />}
-        {tab === "transactions" && <AdminTransactions {...panelProps} />}
-        {tab === "cards" && <AdminCards {...panelProps} />}
+        {tab === "accounts" && clientTab === null && <AdminAccounts {...panelProps} />}
+        {tab === "transactions" && clientTab === null && <AdminTransactions {...panelProps} />}
+        {tab === "cards" && clientTab === null && <AdminCards {...panelProps} />}
         {tab === "operations" && <AdminOperations {...panelProps} />}
         {tab === "approvals" && <AdminApprovals {...panelProps} />}
         {tab === "analytics" && <AdminAnalytics {...panelProps} />}
@@ -421,6 +446,462 @@ export default function AdminDashboard({
         {tab === "audit" && <AdminAuditLog auditLogs={auditLogs} />}
       </main>
     </div>
+  );
+}
+
+function ClientDetailView({
+  clientKey,
+  clientTab,
+  setClientTab,
+  onBack,
+  ops,
+}: {
+  clientKey: string;
+  clientTab: "overview" | "transactions" | "accounts" | "cards";
+  setClientTab: (tab: "overview" | "transactions" | "accounts" | "cards") => void;
+  onBack: () => void;
+  ops: AdminOps;
+}) {
+  const entry = ops.users.find((u) => u.key === clientKey);
+  if (!entry) return null;
+  const p = entry.profile;
+
+  const clientTabs: { id: "overview" | "transactions" | "accounts" | "cards"; label: string }[] = [
+    { id: "overview", label: "Overview" },
+    { id: "transactions", label: "Transactions" },
+    { id: "accounts", label: "Accounts" },
+    { id: "cards", label: "Cards" },
+  ];
+
+  return (
+    <div className="flex-1 bg-[#f8f6f1] pb-14">
+      {/* Back bar */}
+      <div className="bg-nbc-navy">
+        <div className="nbc-container flex items-center justify-between gap-3 py-2.5">
+          <button
+            type="button"
+            onClick={onBack}
+            className="flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-[12.5px] font-semibold text-white transition hover:bg-white/20"
+          >
+            <span className="flex-none">←</span>
+            <span className="flex-none">All clients</span>
+          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[12px] text-white/80">{ops.identity?.name ?? "Administration"}</span>
+            <button
+              type="button"
+              onClick={() => {
+                downloadFile(
+                  `nbc-client-${p.email}-${todayIso()}.json`,
+                  JSON.stringify(p, null, 2),
+                  "application/json"
+                );
+                ops.notify(`Exported ${p.fullName}'s record.`);
+              }}
+              className="rounded-full border border-white/40 bg-white/10 px-3 py-1.5 text-[12px] font-medium text-white transition hover:bg-white/20"
+            >
+              Export
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Client header */}
+      <header className="sticky top-0 z-40 border-b border-[#e5e5e5] bg-white">
+        <div className="nbc-container flex flex-wrap items-center justify-between gap-3 py-3">
+          <div className="flex items-center gap-3">
+            <h1 className="text-[18px] font-bold text-nbc-navy">{p.fullName}</h1>
+            {p.status === "frozen" && (
+              <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-[11px] font-bold text-rose-700">
+                ON HOLD
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => ops.onImpersonateUser(clientKey)}
+              className="rounded-full bg-nbc-navy px-3.5 py-1.5 text-[12.5px] font-semibold text-white transition hover:bg-nbc-red"
+            >
+              Sign in as this client
+            </button>
+          </div>
+        </div>
+        {/* Client tabs */}
+        <div className="border-t border-[#efefef]">
+          <div className="nbc-container scroll-tabs">
+            {clientTabs.map((ct) => (
+              <button
+                key={ct.id}
+                type="button"
+                onClick={() => setClientTab(ct.id)}
+                className={`border-b-[3px] px-3.5 py-3 text-[13.5px] transition ${
+                  clientTab === ct.id ? "border-nbc-red font-semibold text-nbc-navy" : "border-transparent text-[#565656] hover:text-nbc-navy"
+                }`}
+              >
+                {ct.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      {/* Client tab content */}
+      <main className="nbc-container py-7">
+        {clientTab === "overview" && (
+          <div className="space-y-6">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-[22px] font-bold text-nbc-navy">Client overview</h2>
+                <p className="mt-1 text-[13px] text-[#565656]">{p.email} · {p.branchName} · {p.roleLabel}</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setClientTab("transactions")}
+                  className="rounded-full bg-nbc-red px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-nbc-red-dark"
+                >
+                  View transactions
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClientTab("accounts")}
+                  className="rounded-full border border-[#c9c3b6] bg-white px-4 py-2 text-[13px] font-semibold text-nbc-navy transition hover:border-nbc-navy"
+                >
+                  Manage accounts
+                </button>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <Kpi label="Accounts" value={String(p.accounts.length)} sub={`${p.cards.length} cards`} />
+              <Kpi label="Total deposits" value={formatMoney(p.accounts.filter((a) => a.category !== "credit" && a.category !== "loan").reduce((s, a) => s + a.balance * (a.currency === "USD" ? 1.36 : 1), 0))} sub="Cash & savings" />
+              <Kpi label="Credit owing" value={formatMoney(p.accounts.filter((a) => a.category === "credit" || a.category === "loan").reduce((s, a) => s + Math.min(a.balance, a.limit ?? 0), 0))} sub="Credit & loans" />
+              <Kpi label="Transactions" value={String(p.transactions.length)} sub={`${p.transactions.filter((t) => t.date === todayIso()).length} today`} />
+            </div>
+
+            <div className="grid gap-5 lg:grid-cols-2">
+              <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5">
+                <h3 className="text-[16px] font-bold text-nbc-navy">Identity</h3>
+                <dl className="mt-3 grid gap-2.5 text-[13px]">
+                  <div className="flex justify-between"><dt className="text-[#666]">Email</dt><dd>{p.email}</dd></div>
+                  <div className="flex justify-between"><dt className="text-[#666]">Phone</dt><dd>{p.phone || "—"}</dd></div>
+                  <div className="flex justify-between"><dt className="text-[#666]">Date of birth</dt><dd>{p.dateOfBirth || "—"}</dd></div>
+                  <div className="flex justify-between"><dt className="text-[#666]">SIN</dt><dd>{maskSin(p.sin)}</dd></div>
+                  <div className="flex justify-between"><dt className="text-[#666]">Member since</dt><dd>{p.memberSince}</dd></div>
+                  <div className="flex justify-between"><dt className="text-[#666]">Status</dt><dd>{p.status ?? "active"}</dd></div>
+                </dl>
+              </div>
+
+              <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5">
+                <h3 className="text-[16px] font-bold text-nbc-navy">Address & advisor</h3>
+                <dl className="mt-3 grid gap-2.5 text-[13px]">
+                  <div className="flex justify-between"><dt className="text-[#666]">Branch</dt><dd>{p.branchName}</dd></div>
+                  <div className="flex justify-between"><dt className="text-[#666]">Advisor</dt><dd>{p.advisorName}</dd></div>
+                  <div className="flex justify-between"><dt className="text-[#666]">Address</dt><dd>{[p.address, p.city, p.province, p.postalCode].filter(Boolean).join(", ") || "—"}</dd></div>
+                  <div className="flex justify-between"><dt className="text-[#666]">Business number</dt><dd>{p.businessNumber || "—"}</dd></div>
+                </dl>
+              </div>
+            </div>
+
+            {p.notes && (
+              <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5">
+                <h3 className="text-[16px] font-bold text-nbc-navy">Internal notes</h3>
+                <p className="mt-1 text-[13px] text-[#444] whitespace-pre-wrap">{p.notes}</p>
+              </div>
+            )}
+
+            <div className="rounded-[6px] border border-[#e5e2da] bg-white p-5">
+              <h3 className="text-[16px] font-bold text-nbc-navy">Accounts on file</h3>
+              <div className="mt-3 divide-y divide-[#efefef]">
+                {p.accounts.map((a) => (
+                  <div key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-nbc-navy">{a.name}</p>
+                      <p className="text-[11.5px] text-[#777]">{a.number} · {a.category} · {a.currency}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-bold tabular-nums text-nbc-navy">{formatMoney(a.balance, a.currency)}</p>
+                      {a.limit !== undefined && a.category === "credit" && (
+                        <p className="text-[11px] text-[#777]">Limit: {formatMoney(a.limit)}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {clientTab === "transactions" && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-[22px] font-bold text-nbc-navy">Transaction history</h2>
+                <p className="mt-1 text-[13px] text-[#565656]">{p.fullName} · {p.email}</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => downloadFile(`statement-${p.email}-${todayIso()}.csv`, statementCsv(p))}
+                  className="rounded-full border border-[#c9c3b6] bg-white px-4 py-2 text-[13px] font-semibold text-nbc-navy transition hover:border-nbc-navy"
+                >
+                  Download CSV
+                </button>
+              </div>
+            </div>
+
+            {/* Post transaction form */}
+            <PostTransactionForm
+              key={clientKey}
+              profile={p}
+              accountId={p.accounts[0]?.id ?? ""}
+              onPost={(tx) => {
+                ops.onUpdateUser(clientKey, (prev) => applyAdminTransaction(prev, tx), "TRANSACTION_POSTED", `Posted transaction on ${p.fullName}`);
+                ops.notify("Transaction posted.");
+              }}
+            />
+
+            {/* Transaction table */}
+            <div className="overflow-hidden rounded-[6px] border border-[#e5e2da] bg-white">
+              <div className="flex flex-wrap items-center gap-2 border-b border-[#e5e2da] bg-[#fcfbf8] px-3.5 py-2.5 text-[11.5px] font-semibold text-[#565656]">
+                <span>Date</span>
+                <span>Description</span>
+                <span>Account</span>
+                <span className="text-right">Amount</span>
+                <span className="text-right">Status</span>
+              </div>
+              <div className="divide-y divide-[#efefef]">
+                {p.transactions.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-[13px] text-[#565656]">No transactions yet.</p>
+                ) : (
+                  p.transactions
+                    .slice()
+                    .sort((a, b) => (a.date < b.date ? 1 : -1))
+                    .map((tx) => {
+                      const acc = p.accounts.find((a) => a.id === tx.accountId);
+                      return (
+                        <div key={tx.id} className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 text-[13px]">
+                          <span className="text-[#565656]">{tx.date}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="font-medium text-[#121212]">{tx.description}</span>
+                            {tx.failureReason && (
+                              <span className="mt-0.5 block text-[11px] font-semibold text-[#b91c1c] bg-rose-50 px-1.5 py-0.5 rounded">
+                                Reversal reason: {tx.failureReason}
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-[#565656]">{acc?.name ?? tx.accountId}</span>
+                          <span className={`whitespace-nowrap text-right font-semibold tabular-nums ${tx.amount >= 0 ? "text-[#017a33]" : "text-[#121212]"}`}>
+                            {tx.amount >= 0 ? `+${formatMoney(tx.amount, acc?.currency ?? "CAD")}` : formatMoney(tx.amount, acc?.currency ?? "CAD")}
+                          </span>
+                          <span className="text-right">{tx.status ?? "Posted"}</span>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {clientTab === "accounts" && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-[22px] font-bold text-nbc-navy">Account management</h2>
+                <p className="mt-1 text-[13px] text-[#565656]">{p.fullName} · {p.email}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {p.accounts.map((a) => (
+                <div key={a.id} className="rounded-[6px] border border-[#e5e2da] bg-white p-5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="font-bold text-nbc-navy">{a.name}</p>
+                      <p className="text-[11.5px] text-[#777]">{a.number}</p>
+                    </div>
+                    <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase ${a.category === "credit" || a.category === "loan" ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-800"}`}>
+                      {a.category}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[13px] text-[#565656]">{a.subtitle}</p>
+                  <p className="mt-2 text-[17px] font-bold tabular-nums text-nbc-navy">{formatMoney(a.balance, a.currency)}</p>
+                  {a.limit !== undefined && (
+                    <p className="mt-0.5 text-[11.5px] text-[#777]">Limit: {formatMoney(a.limit)}</p>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => ops.onUpdateUser(clientKey, (prev) => applyAdminTransaction(prev, { accountId: a.id, description: "Administrative credit", amount: 100, type: "credit", category: "Income", status: "Posted", date: todayIso(), applyBalance: true }), "TRANSACTION_POSTED", `Credited $100 to ${a.name}`)}
+                      className="rounded-full bg-[#017a33] px-3 py-1 text-[11.5px] font-semibold text-white hover:bg-[#015c27]"
+                    >
+                      + Credit $100
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => ops.onUpdateUser(clientKey, (prev) => applyAdminTransaction(prev, { accountId: a.id, description: "Administrative debit", amount: 100, type: "debit", category: "Utilities", status: "Posted", date: todayIso(), applyBalance: true }), "TRANSACTION_POSTED", `Debited $100 from ${a.name}`)}
+                      className="rounded-full bg-rose-100 px-3 py-1 text-[11.5px] font-semibold text-rose-700 hover:bg-rose-200"
+                    >
+                      - Debit $100
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {clientTab === "cards" && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 className="text-[22px] font-bold text-nbc-navy">Cards & limits</h2>
+                <p className="mt-1 text-[13px] text-[#565656]">{p.fullName} · {p.email}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setClientTab("transactions")}
+                className="rounded-full border border-[#c9c3b6] bg-white px-4 py-2 text-[13px] font-semibold text-nbc-navy transition hover:border-nbc-navy"
+              >
+                Back to transactions
+              </button>
+            </div>
+
+            {p.cards.length === 0 ? (
+              <p className="text-[13px] text-[#565656]">No cards issued for this client.</p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {p.cards.map((card) => {
+                  const linked = p.accounts.find((a) => a.id === card.linkedAccountId);
+                  return (
+                    <div key={card.id} className="rounded-[6px] border border-[#e5e2da] bg-white p-5">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-bold text-nbc-navy">{card.label}</p>
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${card.locked ? "bg-amber-100 text-amber-900" : "bg-emerald-100 text-emerald-800"}`}>
+                          {card.locked ? "Frozen" : "Active"}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-[12px] text-[#565656]">{card.network} · ending {card.last4}</p>
+                      <p className="mt-1 text-[12px] text-[#565656]">Cardholder: {card.cardholderName || "—"}</p>
+                      <p className="mt-1 text-[12px] text-[#565656]">Card number: {card.number ? card.number.replace(/(.{4})/g, "$1 ").trim() : `•••• •••• •••• ${card.last4}`}</p>
+                      <p className="mt-1 text-[12px] text-[#565656]">CVV: {card.cvv ?? "—"}</p>
+                      <p className="mt-1 text-[12px] text-[#565656]">Expiry: {card.expiry}</p>
+                      <p className="mt-1 text-[12px] text-[#565656]">Billing address: {card.billingAddress || "—"}</p>
+                      <p className="mt-1 text-[12px] text-[#565656]">Linked account: {linked?.name ?? "Unassigned"}</p>
+                      {card.monthlyLimit !== undefined && (
+                        <p className="mt-1 text-[12px] text-[#565656]">Monthly limit: {formatMoney(card.monthlyLimit)}</p>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => ops.onUpdateUser(clientKey, (prev) => freezeCard(prev, card.id, "Admin"), "CARD_FROZEN", `Froze ${card.label}`)}
+                          className={`rounded-full px-3 py-1 text-[11.5px] font-semibold ${card.locked ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-900"}`}
+                        >
+                          {card.locked ? "Unfreeze" : "Freeze"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function PostTransactionForm({
+  profile,
+  accountId,
+  onPost,
+}: {
+  profile: BankUserProfile;
+  accountId: string;
+  onPost: (input: AdminTransactionInput) => void;
+}) {
+  const [type, setType] = useState<"credit" | "debit">("credit");
+  const [desc, setDesc] = useState("Administration entry");
+  const [amount, setAmount] = useState("100");
+  const [category, setCategory] = useState<Transaction["category"]>("Income");
+  const [status, setStatus] = useState<"Posted" | "Pending" | "Failed">("Posted");
+  const [date, setDate] = useState(todayIso());
+  const [applyBalance, setApplyBalance] = useState(true);
+
+  const activeAccount = profile.accounts.find((a) => a.id === accountId) ?? profile.accounts[0];
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amt = Number(amount);
+    if (!amt || !Number.isFinite(amt)) return;
+    onPost({
+      accountId: activeAccount?.id ?? "",
+      description: desc.trim() || "Administration entry",
+      amount: amt,
+      type,
+      category,
+      status,
+      failureReason: status === "Failed" ? TRANSFER_FAILURE_REASONS[0] : undefined,
+      date,
+      applyBalance,
+    });
+    setAmount("100");
+    setDesc("Administration entry");
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="rounded-[6px] border border-[#e5e2da] bg-white p-5 space-y-3">
+      <h3 className="text-[15px] font-bold text-nbc-navy">Post a transaction</h3>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex gap-2">
+          <label className="flex items-center gap-1.5 text-[12.5px] font-semibold text-nbc-navy">
+            <input type="radio" name="type" value="credit" checked={type === "credit"} onChange={(e) => setType(e.target.value as "credit" | "debit")} className="h-3.5 w-3.5 accent-nbc-red" />
+            Credit
+          </label>
+          <label className="flex items-center gap-1.5 text-[12.5px] font-semibold text-nbc-navy">
+            <input type="radio" name="type" value="debit" checked={type === "debit"} onChange={(e) => setType(e.target.value as "credit" | "debit")} className="h-3.5 w-3.5 accent-nbc-red" />
+            Debit
+          </label>
+        </div>
+        <div className="flex gap-2">
+          <label className="flex items-center gap-1.5 text-[12.5px] font-semibold">
+            <input type="checkbox" checked={applyBalance} onChange={(e) => setApplyBalance(e.target.checked)} className="h-3.5 w-3.5 accent-nbc-red" />
+            Apply to balance
+          </label>
+          <select value={category} onChange={(e) => setCategory(e.target.value as Transaction["category"])} className="rounded-[6px] border border-[#c9c3b6] bg-white px-2 py-1 text-[12.5px]">
+            <option value="Income">Income</option>
+            <option value="Transfer">Transfer</option>
+            <option value="Utilities">Utilities</option>
+            <option value="Shopping">Shopping</option>
+            <option value="Business">Business</option>
+            <option value="Groceries">Groceries</option>
+            <option value="Dining">Dining</option>
+            <option value="Investments">Investments</option>
+          </select>
+        </div>
+        <div className="flex gap-2 items-end">
+          <label className="text-[12.5px] font-semibold text-[#121212]">Amount</label>
+          <input className="flex-1 rounded-[6px] border border-[#c9c3b6] bg-white px-2.5 py-1.5 text-[13px] text-nbc-navy" type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+          <span className="text-[12px] text-[#777]">{activeAccount?.currency ?? "CAD"}</span>
+        </div>
+        <div className="flex gap-2 items-end">
+          <label className="text-[12.5px] font-semibold text-[#121212]">Description</label>
+          <input className="flex-1 rounded-[6px] border border-[#c9c3b6] bg-white px-2.5 py-1.5 text-[13px]" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Entry description" />
+        </div>
+        <div className="flex gap-2 items-end">
+          <label className="text-[12.5px] font-semibold text-[#121212]">Date</label>
+          <input className="flex-1 rounded-[6px] border border-[#c9c3b6] bg-white px-2.5 py-1.5 text-[13px]" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <select value={status} onChange={(e) => setStatus(e.target.value as "Posted" | "Pending" | "Failed")} className="rounded-[6px] border border-[#c9c3b6] bg-white px-2 py-1 text-[12.5px]">
+            <option value="Posted">Posted</option>
+            <option value="Pending">Pending</option>
+            <option value="Failed">Failed</option>
+          </select>
+        </div>
+      </div>
+      <button type="submit" className="nbc-btn nbc-btn-primary py-2 text-[13px]">Post transaction</button>
+    </form>
   );
 }
 
