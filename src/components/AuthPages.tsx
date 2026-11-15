@@ -99,9 +99,15 @@ export function LoginPage({
     }
 
     // Try Supabase auth first if configured (more reliable across browsers)
+    let supabaseResult: { ok: boolean; error?: string; user?: { email: string; id: string } } | null = null;
     if (isSupabaseConfigured) {
-      const result = await signInWithEmail(cleanEmail, pass);
-      if (result.ok && result.user) {
+      try {
+        supabaseResult = await signInWithEmail(cleanEmail, pass);
+      } catch (err: unknown) {
+        console.warn("Supabase signInWithPassword threw:", err);
+        supabaseResult = { ok: false, error: "Supabase sign-in error" };
+      }
+      if (supabaseResult && supabaseResult.ok && supabaseResult.user) {
         // Supabase auth succeeded - now find the local profile
         // Check custom profiles first
         const matchedCustom = customProfiles.find(
@@ -119,7 +125,7 @@ export function LoginPage({
           { persona: "business", password: "Business2025!", pin: "2486" },
           { persona: "wealth", password: "Wealth2025!", pin: "6194" },
         ];
-        const builtIn = builtIns.find((b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === result.user.email.toLowerCase());
+        const builtIn = builtIns.find((b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === supabaseResult!.user.email.toLowerCase());
         if (builtIn) {
           setPendingPersona(builtIn.persona);
           setStep("pin");
@@ -129,7 +135,7 @@ export function LoginPage({
         // No matching profile found - log in anyway for Supabase-synced profiles
         // The profile will be fetched from Supabase when the dashboard loads
         onSignInCustom({
-          id: "supabase-" + result.user.id,
+          id: "supabase-" + supabaseResult!.user.id,
           accountKind: "personal",
           status: "active",
           fullName: "Supabase User",
@@ -149,6 +155,12 @@ export function LoginPage({
         });
         setError("");
         return;
+      }
+
+      // Supabase auth failed - don't show error yet, try local auth fallback first
+      // (GoTrue rejects SQL-created users, so we fall through to local auth below)
+      if (supabaseResult && supabaseResult.error && supabaseResult.error.includes("not configured")) {
+        // Supabase not configured - fall through to local auth
       }
     }
 
