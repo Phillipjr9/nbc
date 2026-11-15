@@ -36,8 +36,8 @@ Behaviour:
 - Launcher opens a chat panel: header, day separators, bubbles, timestamps,
   read ticks (✓ sent, ✓✓ read), Enter to send, Shift+Enter for a new line,
   Escape to close, quick-start prompts for an empty thread.
-- First message is answered by the support assistant (see below) and appears to
-  the client as a normal Support reply.
+- Every message a signed-in client sends goes to the Support desk and is
+  answered by a person. Nothing is answered automatically (see below).
 - **Anonymity rules** — the client must never learn that a person in the
   back office is answering:
   - The correspondent is only ever “National Bank Support” / “Support”.
@@ -49,39 +49,46 @@ Behaviour:
   - Verified by rendering the panel and asserting no staff identifiers appear in
     the markup.
 
-## AI support (assistant answers first)
+## Support assistant (no automatic replies)
 
 | File | Role |
 | --- | --- |
-| `src/banking/supportAssistant.ts` | Intent engine, data-grounded replies, escalation, desk briefing |
+| `src/banking/supportAssistant.ts` | Intent engine, data-grounded analysis, desk briefing |
 
-Every client message is answered by the support assistant **before** it reaches
-the live desk:
+**The assistant does not answer the client.** The desk does.
 
-1. The client sends a message; the assistant is run synchronously against that
-   client's own profile and the conversation history.
-2. The message is stored with `awaitingDesk: result.escalate`. A short “Support
-   is typing…” beat is shown, then the assistant reply is appended as a Support
-   message flagged `automated: true`.
-3. If the assistant escalated, the client's message keeps `awaitingDesk: true`,
-   which is what raises the desk badge, the “Needs reply” flag and the chime.
-   Conversations the assistant resolved do **not** interrupt the desk.
+It used to answer every message before the desk saw it. Only a handful of
+phrasings matched its intent list, so in a real conversation almost every message
+fell through to the same canned line — *“Thanks for the message, … I’m not
+certain I have the full picture”* — and the actual reply was pushed down the
+panel. Removing it is deliberate:
 
-What the assistant can answer from real data: balances and available funds,
-specific ledger entries (it matches merchant words against the client's
-transactions), duplicate-charge detection (same description + amount within 10
-days), declined/locked cards (it checks the card state), scheduled transfers,
-fees, lending rates, opening hours and contact details.
+1. The client sends a message.
+2. It is stored with `awaitingDesk: true` and `planSupportTurn()` returns
+   `reply: null`. No “typing” beat, no automated bubble.
+3. That flag is what raises the desk badge, the “Needs reply” marker and the
+   chime, so a specialist answers in the conversation (see the delivery
+   heartbeat — about a second in either direction).
 
-It always hands over to a specialist for: fraud or unauthorised activity, lost or
-stolen cards, declined cards needing an unlock or limit change, duplicate/refund
-disputes, explicit “talk to a person”, and anything it cannot classify
-(confidence below 0.6) — so it never guesses on a banking question.
+What the assistant still does — behind the counter:
 
-`supportAssistant.generateSupportReply()` is the single integration point. It is a
-deterministic, on-device engine because the deployment has no LLM credentials;
-swapping in a hosted model means replacing that function body with an API call
-and returning the same `{ reply, intent, confidence, escalate, tags }` shape.
+- `generateSupportReply()` classifies the message against the client's own data
+  (balances and available funds, specific ledger entries, duplicate charges —
+  same description and amount within 10 days, declined/locked cards, scheduled
+  transfers, fees, lending rates, hours and contact details). Its `reply` text is
+  for the desk, not for the client.
+- `draftDeskAssist()` turns that into the **briefing** (summary, intent,
+  confidence, triage tags) and the **suggested reply** with *Insert draft* /
+  *Send as-is* / *Discard*.
+
+`generateSupportReply()` is the single integration point. It is a deterministic,
+on-device engine because the deployment has no LLM credentials; swapping in a
+hosted model means replacing that function body with an API call and returning
+the same `{ reply, intent, confidence, escalate, tags }` shape.
+
+Signed-out visitors are the exception: there is no desk to hand them to, so
+`publicAssistant.ts` still answers general questions (rates, appointments,
+opening an account, card safety) with the matching action links.
 
 ### Desk assistance
 
@@ -109,14 +116,13 @@ follows:
 | Support panel footer | “Prefer email? o41081419@gmail.com” |
 | Public assistant — “talk to a person” | The address as a channel plus an **Email Support** action link |
 | Public assistant — fallback | Quotes the address |
-| Signed-in assistant — hours/contact | Lists email alongside the phone numbers |
-| First acknowledgement in a new thread | Mentions the address as the urgent fallback |
+| Desk briefing — hours/contact suggestion | Lists email alongside the phone numbers |
 
 `mailto:` links open the mail client instead of routing inside the SPA.
 
 ## Talking to Support directly
 
-The assistant answers first, but the client is never trapped behind it.
+Every message already reaches the desk; the controls below just say it out loud.
 
 | Where | Control | What happens |
 | --- | --- | --- |
@@ -127,9 +133,9 @@ The assistant answers first, but the client is never trapped behind it.
 
 Once `supportHandoff` is set:
 
-- `planSupportTurn()` stops calling the assistant: `reply` is `null`, so **every** later
-  message goes to the desk with `awaitingDesk: true` — no assistant reply, no
-  invented answer, no “typing” beat from the assistant.
+- `planSupportTurn()` tags the conversation `with-specialist`, and **every** later
+  message goes to the desk with `awaitingDesk: true` — no automatic reply, no
+  invented answer, no “typing” beat.
 - The client sees a green status line: *“You're with a specialist — replies can
   take a few minutes”*, and the footer drops the automation note in favour of
   “You're chatting with a specialist”.
@@ -243,28 +249,24 @@ Three faults compounded, and all three are fixed:
    does every time it sleeps — the conversation fell back to a 30 s poll. Fixed
    by the thread heartbeat above, which is fast without Realtime.
 
-The chat also stops holding your words back: a second message is no longer
-blocked by the assistant's "typing" beat.
-
 ## Try it
 
 1. Sign in as the personal client (`alex.tremblay@videotron.ca` / `National2025!` /
    PIN `7935`), press **Support** bottom-right and ask “What is my balance?” —
-   the assistant answers instantly and **nothing** is escalated to the desk.
-2. Ask “My card was declined” or “Can I talk to a person?” — the assistant
-   answers and escalates.
-3. Open the back office (`admin@nbc.ca` / `admin1234`) → **Support inbox**: the
+   the message goes straight to the desk, with no automatic reply in the panel.
+2. Open the back office (`admin@nbc.ca` / `admin1234`) → **Support inbox**: the
    thread is flagged “Needs reply”, the tab badge shows the count and the chime
-   plays if sound is on. The **Assistant briefing** shows the summary, tags and a
-   ready-to-send reply. Send it.
-4. Back in the client dashboard the specialist's reply lands immediately (one
-   realtime broadcast, ~1 s) and still reads as **Support**.
-5. In the same conversation press **Talk to a person now**: the assistant stops
-   answering, a specialist acknowledgement appears, and every message from then
-   on lands in the desk inbox (sorted first, tagged “Asked for a specialist”).
-6. Sign out and press the same **Support** button on the marketing site: the
+   plays if sound is on. The **briefing** shows the summary, the intent, the tags
+   and a ready-to-send reply quoting the real balance. Send it.
+3. Back in the client dashboard the specialist's reply lands in about a second
+   and still reads as **Support**.
+4. In the same conversation press **Talk to a person now**: a specialist
+   acknowledgement appears and the conversation is tagged “Asked for a
+   specialist” in the desk inbox, sorted first.
+5. Sign out and press the same **Support** button on the marketing site: the
    panel answers “Today's rates”, “Book an appointment”, “Lost or stolen card”
-   and “Open an account” without needing an account.
+   and “Open an account” without needing an account — visitors have no desk to
+   reach, so this is the only place an automatic answer appears.
 
 ## Tests
 
@@ -272,7 +274,7 @@ blocked by the assistant's "typing" beat.
 
 | Suite | What it pins down |
 | --- | --- |
-| `src/__tests__/supportAssistant.test.ts` | Every escalation rule, the no-escalation answers, balances quoted from the client's own accounts, no back-office identity in any reply, desk briefing |
+| `src/__tests__/supportAssistant.test.ts` | The assistant never answers on its own (every message goes to the desk), the triage intents and tags the briefing relies on, balances quoted from the client's own accounts, no back-office identity in any text, desk briefing |
 | `src/__tests__/publicAssistant.test.ts` | The signed-out topics and their links, greetings, and that nothing names a bot, model or staff member |
 | `src/__tests__/supportChat.test.ts` | Thread append/read/merge, desk notification gating (`awaitingDesk` only), idempotent read marks, ordering, the specialist handoff |
 | `src/__tests__/supportChatWidget.test.tsx` | One launcher only, the direct “Talk to a person now” control, and the specialist status line replacing it |

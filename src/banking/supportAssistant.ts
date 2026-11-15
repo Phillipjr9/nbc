@@ -3,17 +3,24 @@ import { formatMoney } from "./bankingTypes";
 import { SUPPORT_EMAIL, formatSupportDay, isWithSpecialist, supportThreadOf } from "./supportChat";
 
 /**
- * Support assistant ("AI support").
+ * Support assistant — triage and desk briefing.
  *
- * Every client message is answered here *before* it reaches the live Support
- * desk. The assistant is deterministic and runs entirely on the device: it reads
- * the client's own profile (accounts, ledger, cards, scheduled transfers) so its
- * answers quote real numbers, and it decides whether the conversation must be
- * handed to a human specialist.
+ * The assistant **no longer replies to the client**. It used to answer every
+ * message before the desk saw it, and when it could not classify the question
+ * (which is most of the time in a real conversation) it posted the same canned
+ * line: "Thanks for the message, … I'm not certain I have the full picture".
+ * Every message therefore got an identical robot answer and the real reply was
+ * pushed down the panel, so the client now talks to a person and the assistant
+ * works behind the counter.
  *
- * `generateSupportReply()` is the single integration point — swapping in a hosted
- * model later means replacing this function's body with an API call and keeping
- * the same return shape.
+ * What it still does:
+ *  - `generateSupportReply()` classifies the message (intent, confidence, tags)
+ *    against the client's own data — balances, ledger entries, cards, transfers
+ *    — and is what `draftDeskAssist()` turns into the desk's briefing and
+ *    suggested reply. Its `reply` text is for the desk, not for the client.
+ *  - It is deterministic and runs on the device; swapping in a hosted model later
+ *    means replacing that function body with an API call and keeping the same
+ *    `{ reply, intent, confidence, escalate, tags }` shape.
  */
 
 export type AssistantIntent =
@@ -336,11 +343,14 @@ export function generateSupportReply(
 /**
  * Decides what happens to one message the client just typed.
  *
- * Two paths:
- *  - the conversation is with the assistant, so it answers first and only
- *    escalates when it cannot resolve the request;
- *  - the client asked to talk to a person (`profile.supportHandoff`), so the
- *    message goes straight to the Support desk and the assistant stays silent.
+ * One rule: **it goes to the Support desk, and only a person answers.** The
+ * message is always flagged `awaitingDesk` (that flag raises the desk badge, the
+ * "Needs reply" marker and the chime) and `reply` is always `null`, so the panel
+ * never fills up with automatic text — the previous behaviour answered with the
+ * same canned line whenever the question fell outside the assistant's list.
+ *
+ * The intent/confidence/tags are still computed: the desk briefing uses them to
+ * show what the client is asking about, and they cost nothing on the device.
  */
 export type SupportTurnPlan = {
   /** Mark the client message `awaitingDesk` so the desk badge and chime fire. */
@@ -363,8 +373,9 @@ export function planSupportTurn(
 
   const answer = generateSupportReply(profile, message, history);
   return {
-    awaitingDesk: answer.escalate,
-    reply: answer.reply,
+    // Always the desk: no automatic reply, no "typing" beat, no canned text.
+    awaitingDesk: true,
+    reply: null,
     intent: answer.intent,
     confidence: answer.confidence,
     tags: answer.tags,

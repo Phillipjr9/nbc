@@ -238,10 +238,12 @@ export default function SupportChat({
   /**
    * Sends a message.
    *
-   * Signed in: the support assistant answers first, from the client's own data,
-   * and marks the message `awaitingDesk` only when it cannot resolve it — that
-   * flag is what raises the desk badge and the notification chime.
-   * Signed out: the public answers in `publicAssistant.ts` reply instead.
+   * Signed in: it goes straight to the Support desk, flagged `awaitingDesk` so the
+   * desk badge and the chime fire immediately. Nothing is answered automatically
+   * — an automatic line after every message (and the same line every time) read
+   * as a robot answering and buried the real reply.
+   * Signed out: the public answers in `publicAssistant.ts` reply instead, because
+   * there is no desk to hand a signed-out visitor to.
    */
   const send = (raw?: string) => {
     const body = (raw ?? draft).trim();
@@ -282,21 +284,8 @@ export default function SupportChat({
     const plan = planSupportTurn(profile, body, thread);
     onUpdateProfile((prev) => appendSupportMessage(prev, "client", body, { awaitingDesk: plan.awaitingDesk }));
     setDraft("");
-
-    // Straight to the desk: no assistant beat, no invented reply.
-    if (!plan.reply) return;
-
-    setTyping(true);
-
-    // A short "typing" beat keeps the conversation feeling live. If the client
-    // is already mid-conversation the reply lands right away instead of queueing
-    // another beat on top of the first.
-    const delay = typing ? 120 : 700 + Math.min(900, body.length * 12);
-    const timer = window.setTimeout(() => {
-      onUpdateProfile((prev) => appendSupportMessage(prev, "support", plan.reply as string, { automated: true }));
-      setTyping(false);
-    }, delay);
-    timers.current.push(timer);
+    // Hand over to the desk. `plan.reply` is always null for a signed-in client:
+    // the assistant triages the message for the specialist but never speaks.
   };
 
   /**
@@ -562,17 +551,17 @@ export default function SupportChat({
               </a>
             </p>
             <p className="mt-1 px-1 text-[10.5px] leading-[15px] text-[#8a8a8a]">
-              {profile && withSpecialist ? (
+              {profile ? (
                 <>
-                  You&rsquo;re chatting with a specialist. Messages are saved to your profile so you can pick
-                  up on any device.
+                  {withSpecialist
+                    ? "You’re chatting with a specialist. "
+                    : "A Support specialist answers here — usually within a few minutes, around the clock. "}
+                  Messages are saved to your profile so you can pick up on any device.
                 </>
               ) : (
                 <>
-                  {profile
-                    ? `${SUPPORT_SHORT_NAME} replies instantly and can bring in a specialist at any time. Saved to your profile.`
-                    : `${SUPPORT_SHORT_NAME} answers 24/7. Sign in and we can look at your own file.`}{" "}
-                  <span className="whitespace-nowrap">Automated assistance may be used.</span>
+                  {SUPPORT_SHORT_NAME} answers 24/7. Sign in and a specialist can look at your own file.{" "}
+                  <span className="whitespace-nowrap">Automated answers are used for general questions.</span>
                 </>
               )}
             </p>
