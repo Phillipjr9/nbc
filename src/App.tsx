@@ -426,23 +426,28 @@ export default function App() {
     });
 
     if (key === "personal" || key === "business" || key === "wealth") {
-      setProfiles((prev) => {
+      setProfiles(async (prev) => {
         const next = normalizeProfile(updater(prev[key]));
-        // Persist to Supabase so remote sync cannot overwrite admin changes
+        // Persist to Supabase so remote sync cannot overwrite admin changes.
+        // Await so the write completes before the state update is considered done.
         if (isSupabaseConfigured) {
-          upsertProfile(next).catch((err) => console.warn("Supabase profile upsert failed:", err.message));
+          try { await upsertProfile(next); } catch (err) {
+            console.warn("Supabase profile upsert failed:", err);
+          }
         }
         return { ...prev, [key]: next };
       });
     } else {
-      setCustomProfiles((prev) => {
+      setCustomProfiles(async (prev) => {
         const next = prev.map((cp) =>
           cp.email.toLowerCase() === key.toLowerCase() ? normalizeProfile(updater(cp)) : cp
         );
-        // Persist to Supabase so remote sync cannot overwrite admin changes
+        // Persist to Supabase so remote sync cannot overwrite admin changes.
         const updated = next.find((cp) => cp.email.toLowerCase() === key.toLowerCase());
         if (isSupabaseConfigured && updated) {
-          upsertProfile(updated).catch((err) => console.warn("Supabase profile upsert failed:", err.message));
+          try { await upsertProfile(updated); } catch (err) {
+            console.warn("Supabase profile upsert failed:", err);
+          }
         }
         return next;
       });
