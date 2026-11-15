@@ -16,4 +16,9 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  // Dev-server only: allow the hosted preview domain to reach the app.
+  server: {
+    host: "0.0.0.0",
+    allowedHosts: [".e2b.app"],
+  },
 });

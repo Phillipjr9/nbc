@@ -223,6 +223,32 @@ export type ClientMessage = {
   sentBy: string;
 };
 
+/**
+ * One message in a client's private support thread.
+ *
+ * The thread is deliberately anonymous on the client side: messages only carry
+ * `side: "client" | "support"`, never an administrator's name, role or note.
+ * Anything written here is visible to the customer, so do not add internal
+ * fields (assignee, back-office id, audit actor) to this type.
+ */
+export type SupportMessage = {
+  id: string;
+  /** `client` = the customer wrote it, `support` = the Support desk answered. */
+  side: "client" | "support";
+  body: string;
+  /** Absolute instant (ISO 8601). Rendered in the reader's own timezone. */
+  createdAt: string;
+  readByClient?: boolean;
+  readBySupport?: boolean;
+  /** System/assistant reply rather than a person — flagged in the back office only. */
+  automated?: boolean;
+  /**
+   * Client message the assistant could not resolve, so the Support desk must
+   * answer it. Drives the desk badge and the new-message chime.
+   */
+  awaitingDesk?: boolean;
+};
+
 export type ScheduledTransfer = {
   id: string;
   fromAccountId: string;
@@ -344,6 +370,8 @@ export type BankUserProfile = {
   payrollRoster?: EmployeePayrollItem[];
   invoices?: BusinessInvoice[];
   scheduled?: ScheduledTransfer[];
+  /** Private support conversation with the Support desk. */
+  supportThread?: SupportMessage[];
 };
 
 export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUserProfile> = {
@@ -531,6 +559,29 @@ export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUs
           status: "Posted",
         })
       ),
+    ],
+    /**
+     * Seeded support conversation for the demo client. Client-side copy only —
+     * see `supportChat.ts` for why no staff identity is stored here.
+     */
+    supportThread: [
+      {
+        id: "sup-seed-1",
+        side: "support",
+        body: "Hi Alex, this is National Bank Support. Your new Allure Mastercard is on its way — the courier shows delivery on Thursday before 6 p.m.",
+        createdAt: "2026-05-15T14:05:00.000Z",
+        readByClient: true,
+        readBySupport: true,
+      },
+      {
+        id: "sup-seed-2",
+        side: "client",
+        body: "Perfect, thanks. One thing — the Netflix charge looks duplicated this month.",
+        createdAt: "2026-05-15T14:12:00.000Z",
+        readByClient: true,
+        readBySupport: false,
+        awaitingDesk: true,
+      },
     ],
     payees: [
       { id: "pay-1", name: "Hydro-Québec", accountRef: "HQ-8841209", category: "Utilities", lastPaid: "$128.65 on May 13" },

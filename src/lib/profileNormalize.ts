@@ -1,4 +1,4 @@
-import type { BankUserProfile, Transaction } from "../banking/bankingTypes";
+import type { BankUserProfile, SupportMessage, Transaction } from "../banking/bankingTypes";
 import { normalizeBankCardList } from "../banking/bankingTypes";
 import { normalizeIsoDate } from "./dates";
 
@@ -61,6 +61,7 @@ export function ensureProfileShape(profile: BankUserProfile): BankUserProfile {
     documents: asArray(profile.documents),
     messages: asArray(profile.messages),
     scheduled: asArray(profile.scheduled),
+    supportThread: asArray<SupportMessage>(profile.supportThread),
     ...(profile.payrollRoster ? { payrollRoster: asArray(profile.payrollRoster) } : {}),
     ...(profile.invoices ? { invoices: asArray(profile.invoices) } : {}),
   };

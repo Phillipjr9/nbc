@@ -17,6 +17,7 @@ import {
   TRANSFER_FAILURE_REASONS,
 } from "../banking/bankingTypes";
 import { formatIsoDate, todayIso as localTodayIso } from "../lib/dates";
+import SupportChat from "./SupportChat";
 import { sortTransactionsDesc } from "../lib/profileNormalize";
 import { randomDigits, round2 } from "../banking/adminOps";
 import BankCardVisual from "./BankCardVisual";
@@ -3718,6 +3719,9 @@ export default function BusinessDashboard({
           </div>
         </div>
       )}
+
+      {/* Private one-to-one conversation with the Support desk */}
+      <SupportChat profile={profile} onUpdateProfile={onUpdateProfile} />
     </div>
   );
 }

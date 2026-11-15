@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { logoNbc } from "../assets/nbcAssets";
 import {
   AdminOps,
@@ -26,7 +26,16 @@ import {
 } from "./admin/AdminInsights";
 import AdminOperations from "./admin/AdminOperations";
 import { AdminCards, AdminConfig } from "./admin/AdminService";
+import AdminSupport from "./admin/AdminSupport";
 import AdminTransactions from "./admin/AdminTransactions";
+import { supportThreadOf, unreadSupportCount } from "../banking/supportChat";
+import {
+  isNotificationAudioReady,
+  isSupportSoundEnabled,
+  playSupportChime,
+  setSupportSoundEnabled,
+  unlockNotificationAudio,
+} from "../lib/notificationSound";
 import { ArrowRight, LockIcon } from "./icons";
 
 type Props = {
@@ -55,6 +64,7 @@ const TAB_LABEL: Record<AdminTabId, string> = {
   accounts: "Accounts",
   transactions: "Transactions",
   cards: "Cards",
+  support: "Support inbox",
   operations: "Operations",
   approvals: "Approvals",
   config: "Rates & banners",
@@ -113,6 +123,66 @@ export default function AdminDashboard({
     setToast(message);
     window.setTimeout(() => setToast((cur) => (cur === message ? null : cur)), 4000);
   };
+
+  /* ---------------- Support inbox notifications ---------------- */
+
+  const [soundOn, setSoundOn] = useState<boolean>(() => isSupportSoundEnabled());
+  const [audioReady, setAudioReady] = useState<boolean>(() => isNotificationAudioReady());
+
+  // Browsers only allow audio after a gesture; unlock on the first click/key.
+  useEffect(() => {
+    const unlock = () => {
+      unlockNotificationAudio();
+      setAudioReady(isNotificationAudioReady());
+    };
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
+  const supportUnread = useMemo(
+    () => users.reduce((sum, entry) => sum + unreadSupportCount(entry.profile, "support"), 0),
+    [users]
+  );
+
+  const supportAwaiting = useMemo(
+    () =>
+      users.filter((entry) => {
+        const thread = supportThreadOf(entry.profile);
+        const last = thread[thread.length - 1];
+        return Boolean(last && last.side === "client");
+      }).length,
+    [users]
+  );
+
+  const seenSupportUnread = useRef(supportUnread);
+
+  useEffect(() => {
+    const previous = seenSupportUnread.current;
+    seenSupportUnread.current = supportUnread;
+    if (supportUnread <= previous) return;
+
+    playSupportChime();
+
+    const sender = users
+      .map((entry) => {
+        const thread = supportThreadOf(entry.profile);
+        const lastClient = [...thread].reverse().find((message) => message.side === "client");
+        return { entry, at: lastClient?.createdAt ?? "" };
+      })
+      .filter((row) => row.at)
+      .sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+
+    notify(
+      sender
+        ? `New support message from ${sender.entry.profile.fullName || sender.entry.profile.email}`
+        : "New support message"
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supportUnread]);
 
   const ops: AdminOps = {
     users,
@@ -244,6 +314,32 @@ export default function AdminDashboard({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (!audioReady) {
+                  unlockNotificationAudio();
+                  setAudioReady(isNotificationAudioReady());
+                }
+                const next = !soundOn;
+                setSupportSoundEnabled(next);
+                setSoundOn(next);
+                if (next) playSupportChime();
+              }}
+              aria-pressed={soundOn}
+              title={soundOn ? "Mute new-message sound" : "Enable new-message sound"}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12.5px] font-semibold transition ${
+                soundOn
+                  ? "border-[#c9c3b6] bg-white text-nbc-navy hover:border-nbc-navy"
+                  : "border-[#e0b4b4] bg-[#fff5f5] text-[#842029]"
+              }`}
+            >
+              <span aria-hidden="true">{soundOn ? "🔔" : "🔕"}</span>
+              <span className="hidden sm:inline">{soundOn ? "Sound on" : "Muted"}</span>
+              {supportUnread > 0 && (
+                <span className="rounded-full bg-nbc-red px-1.5 text-[10px] font-bold text-white">{supportUnread}</span>
+              )}
+            </button>
             {can(identity, "clients.create") && (
               <button
                 type="button"
@@ -278,6 +374,9 @@ export default function AdminDashboard({
                 {id === "clients" && <span className="ml-1 text-[11.5px] text-[#777]">({users.length})</span>}
                 {id === "approvals" && pendingApprovals > 0 && (
                   <span className="ml-1.5 rounded-full bg-nbc-red px-1.5 py-0.5 text-[10px] font-bold text-white">{pendingApprovals}</span>
+                )}
+                {id === "support" && supportUnread > 0 && (
+                  <span className="ml-1.5 rounded-full bg-nbc-red px-1.5 py-0.5 text-[10px] font-bold text-white">{supportUnread}</span>
                 )}
               </button>
             ))}
@@ -337,6 +436,7 @@ export default function AdminDashboard({
                     { label: "Issue card", desc: "Set limits & points", tab: "cards" as AdminTabId },
                     { label: "Batch processing", desc: "Interest & fees", tab: "operations" as AdminTabId },
                     { label: "Approvals", desc: `${pendingApprovals} waiting`, tab: "approvals" as AdminTabId },
+                    { label: "Support inbox", desc: `${supportUnread} unread · ${supportAwaiting} waiting`, tab: "support" as AdminTabId },
                   ].map((a) => (
                     <button key={a.label} type="button" onClick={() => setTab(a.tab)} className="group flex items-center justify-between gap-2 rounded-[6px] border border-[#e5e2da] px-3 py-2.5 text-left transition hover:border-nbc-navy hover:bg-[#fcfbf8]">
                       <span>
@@ -434,6 +534,7 @@ export default function AdminDashboard({
         {tab === "clients" && <AdminClients {...panelProps} autoCreate={createRequest} />}
         {tab === "accounts" && clientTab === null && <AdminAccounts {...panelProps} />}
         {tab === "transactions" && clientTab === null && <AdminTransactions {...panelProps} />}
+        {tab === "support" && <AdminSupport {...panelProps} />}
         {tab === "cards" && clientTab === null && <AdminCards {...panelProps} />}
         {tab === "operations" && <AdminOperations {...panelProps} />}
         {tab === "approvals" && <AdminApprovals {...panelProps} />}

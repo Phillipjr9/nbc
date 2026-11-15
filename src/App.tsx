@@ -32,6 +32,7 @@ import { AdviceSection, HelpSection, Hero, PromoSection, ServicesSection } from 
 import SupportPages from "./components/SupportPages";
 import { fetchProfiles, upsertProfile } from "./lib/profileSync";
 import { ensureProfileShape, isPersistableProfile } from "./lib/profileNormalize";
+import { mergeSupportThreads } from "./banking/supportChat";
 import { isSupabaseConfigured } from "./lib/supabase";
 
 const STORAGE_PROFILES_KEY = "nbc_profiles_v1";
@@ -180,6 +181,9 @@ const mergeRemoteProfilesIntoBuiltIn = (
         cards: rp.cards ? normalizeBankCardList(rp.cards) : current.cards,
         transactions: preferTransactionHistory(rp.transactions, current.transactions),
         accounts: rp.accounts && rp.accounts.length > 0 ? rp.accounts : current.accounts,
+        // Two devices can both write between polls; union by message id so a
+        // support reply is never lost by the merge.
+        supportThread: mergeSupportThreads(rp.supportThread, current.supportThread),
       };
     }
   }
@@ -223,6 +227,7 @@ const mergeRemoteProfiles = (existing: BankUserProfile[], remote: BankUserProfil
         cards: profile.cards ? normalizeBankCardList(profile.cards) : local.cards,
         transactions: preferTransactionHistory(profile.transactions, local.transactions),
         accounts: profile.accounts && profile.accounts.length > 0 ? profile.accounts : local.accounts,
+        supportThread: mergeSupportThreads(profile.supportThread, local.supportThread),
       };
     } else {
       merged.push({

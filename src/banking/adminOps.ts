@@ -23,6 +23,7 @@ export type AdminTabId =
   | "accounts"
   | "transactions"
   | "cards"
+  | "support"
   | "operations"
   | "approvals"
   | "config"
