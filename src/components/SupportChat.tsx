@@ -3,6 +3,8 @@ import type { BankUserProfile, PageRoute } from "../banking/bankingTypes";
 import { resolveInternalRoute } from "../banking/routeMapper";
 import {
   SUPPORT_BRAND,
+  SUPPORT_EMAIL,
+  SUPPORT_EMAIL_HREF,
   SUPPORT_PRESENCE,
   SUPPORT_SHORT_NAME,
   appendSupportMessage,
@@ -216,6 +218,11 @@ export default function SupportChat({
 
   /** Opens an action link from an answer (internal route or in-page anchor). */
   const followLink = (link: PublicLink) => {
+    if (link.href.startsWith("mailto:") || link.href.startsWith("tel:")) {
+      // Leave the app for the mail client / dialler rather than routing inside it.
+      window.location.href = link.href;
+      return;
+    }
     setOpen(false);
     if (link.href.startsWith("#")) {
       onNavigate?.({ kind: "home" });
@@ -548,7 +555,13 @@ export default function SupportChat({
                 <ArrowRight className="h-4 w-4" />
               </button>
             </div>
-            <p className="mt-1.5 px-1 text-[10.5px] leading-[15px] text-[#8a8a8a]">
+            <p className="mt-1 px-1 text-[10.5px] leading-[15px] text-[#8a8a8a]">
+              Prefer email?{" "}
+              <a href={SUPPORT_EMAIL_HREF} className="font-semibold text-nbc-link hover:underline">
+                {SUPPORT_EMAIL}
+              </a>
+            </p>
+            <p className="mt-1 px-1 text-[10.5px] leading-[15px] text-[#8a8a8a]">
               {profile && withSpecialist ? (
                 <>
                   You&rsquo;re chatting with a specialist. Messages are saved to your profile so you can pick

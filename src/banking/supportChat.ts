@@ -15,9 +15,17 @@ export const SUPPORT_BRAND = "National Bank Support";
 export const SUPPORT_SHORT_NAME = "Support";
 export const SUPPORT_PRESENCE = "Online · replies instantly, specialist on request";
 
+/**
+ * Client Services email address.
+ *
+ * One constant, so the address on the site, in the chat and in every canned
+ * support answer can never drift apart. Change it here and everything follows.
+ */
+export const SUPPORT_EMAIL = "o41081419@gmail.com";
+export const SUPPORT_EMAIL_HREF = `mailto:${SUPPORT_EMAIL}`;
+
 /** The automated first acknowledgement sent when a client opens a conversation. */
-export const SUPPORT_AUTO_ACK =
-  "Thanks for reaching out. A member of our Support team will reply here shortly. For anything urgent, call us 24/7 at 1-888-835-6281.";
+export const SUPPORT_AUTO_ACK = `Thanks for reaching out. A member of our Support team will reply here shortly. For anything urgent, call us 24/7 at 1-888-835-6281, or email ${SUPPORT_EMAIL}.`;
 
 const newId = () => `msg-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
 

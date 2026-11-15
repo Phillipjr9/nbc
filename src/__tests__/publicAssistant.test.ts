@@ -5,6 +5,7 @@ import {
   answerPublicQuestion,
   publicGreeting,
 } from "../banking/publicAssistant";
+import { SUPPORT_EMAIL, SUPPORT_EMAIL_HREF } from "../banking/supportChat";
 
 describe("answerPublicQuestion", () => {
   it("answers a rates question with rates and action links", () => {
@@ -37,6 +38,7 @@ describe("answerPublicQuestion", () => {
   it("offers a way forward when it does not understand", () => {
     const answer = answerPublicQuestion("asdkjh qwe zxcv");
     expect(answer.links?.map((link) => link.label)).toEqual([
+      "Email Support",
       "Visit the Help centre",
       "Contact us",
     ]);
@@ -85,5 +87,23 @@ describe("talking to a person from the public site", () => {
 
   it("is offered as a first shortcut", () => {
     expect(PUBLIC_QUICK_STARTS[0]).toBe("Talk to a person");
+  });
+});
+
+describe("the Support email address", () => {
+  it("is the one the site publishes", () => {
+    expect(SUPPORT_EMAIL).toBe("o41081419@gmail.com");
+    expect(SUPPORT_EMAIL_HREF).toBe("mailto:o41081419@gmail.com");
+  });
+
+  it("is offered as a direct option to reach a person", () => {
+    const answer = answerPublicQuestion("I want to talk to a person");
+    expect(answer.reply).toContain(SUPPORT_EMAIL);
+    const email = answer.links?.find((link) => link.href === SUPPORT_EMAIL_HREF);
+    expect(email?.label).toBe("Email Support");
+  });
+
+  it("is quoted in the fallback answer too", () => {
+    expect(answerPublicQuestion("asdkjh qwe zxcv").reply).toContain(SUPPORT_EMAIL);
   });
 });

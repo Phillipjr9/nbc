@@ -8,6 +8,7 @@ import {
 } from "../assets/nbcAssets";
 import { PageRoute, SupportSection } from "../banking/bankingTypes";
 import { CalendarIcon, ChevronDown, PinIcon } from "./icons";
+import { SUPPORT_EMAIL, SUPPORT_EMAIL_HREF } from "../banking/supportChat";
 
 type Props = {
   section?: SupportSection;
@@ -129,6 +130,25 @@ export default function SupportPages({ section = "help", onNavigate, onOpenChat 
           </h1>
           <p className="mt-2 max-w-[660px] text-[15.5px] text-white/85">
             Find answers, book an appointment with an advisor, locate a branch, or review security and deposit protection details.
+          </p>
+
+          <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13.5px] text-white/90">
+            <span>
+              Email us:{" "}
+              <a
+                href={SUPPORT_EMAIL_HREF}
+                className="font-semibold text-white underline decoration-1 underline-offset-2 hover:text-white/80"
+              >
+                {SUPPORT_EMAIL}
+              </a>
+            </span>
+            <span className="hidden text-white/40 sm:inline">·</span>
+            <span>
+              Client Services 24/7:{" "}
+              <a href="tel:+18888356281" className="font-semibold text-white underline decoration-1 underline-offset-2 hover:text-white/80">
+                1-888-835-6281
+              </a>
+            </span>
           </p>
 
           <div className="mt-6 flex flex-wrap gap-2">

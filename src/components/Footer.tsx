@@ -2,6 +2,7 @@ import { useState } from "react";
 import { logoCdic, logoNbc } from "../assets/nbcAssets";
 import { PageRoute } from "../banking/bankingTypes";
 import { resolveInternalRoute } from "../banking/routeMapper";
+import { SUPPORT_EMAIL, SUPPORT_EMAIL_HREF } from "../banking/supportChat";
 import { footerColumns, legalLinks, socialLinks } from "../data";
 import { CalendarIcon, ChevronDown, LockIcon, PinIcon } from "./icons";
 
@@ -116,7 +117,18 @@ export default function Footer({
 
             <p className="mt-6 text-[12.5px] text-[#565656]">
               Client Services 24/7:{" "}
-              <span className="font-semibold text-nbc-navy">1-888-835-6281</span>
+              <a href="tel:+18888356281" className="font-semibold text-nbc-navy hover:underline">
+                1-888-835-6281
+              </a>
+            </p>
+            <p className="mt-1 text-[12.5px] text-[#565656]">
+              Email:{" "}
+              <a
+                href={SUPPORT_EMAIL_HREF}
+                className="font-semibold text-nbc-navy underline decoration-1 underline-offset-2 hover:text-nbc-link"
+              >
+                {SUPPORT_EMAIL}
+              </a>
             </p>
           </div>
 
