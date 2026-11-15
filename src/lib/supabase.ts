@@ -14,6 +14,7 @@ const supabaseAnonKey =
   undefined;
 
 const supabaseServiceRoleKey =
+  env.VITE_SUPABASE_SERVICE_ROLE_KEY ??
   env.SUPABASE_SERVICE_ROLE_KEY ??
   undefined;
 
