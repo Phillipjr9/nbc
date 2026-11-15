@@ -211,39 +211,33 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
           return false;
         });
 
-        const accountIds = new Set<string>([normalizedTx.accountId]);
-        if (paired) accountIds.add(paired.accountId);
-
-        // Determine if this is an external transfer (no paired transaction found)
-        const isExternalTransfer = !paired && normalizedTx.category === "Transfer";
-
         const reversedEntries = [
           {
             id: newId("rev"),
             accountId: normalizedTx.accountId,
             date: todayIso(),
-            description: isExternalTransfer
-              ? `Reversal — ${normalizedTx.description} [${reason}]`
-              : `Reversal — ${normalizedTx.description}`,
+            description: `Reversal — ${normalizedTx.description} [${reason}]`,
             category: "Transfer" as const,
             amount: -normalizedTx.amount,
             status: "Posted" as const,
             reference: `REV-${randomDigits(6)}`,
             createdBy: "Administration",
-            failureReason: isExternalTransfer ? reason : undefined,
-            failureDetails: isExternalTransfer ? `Reversed by administration: ${reason}` : undefined,
+            failureReason: reason,
+            failureDetails: `Reversed by administration: ${reason}`,
           },
           ...(paired
             ? [{
                 id: newId("rev"),
                 accountId: paired.accountId,
                 date: todayIso(),
-                description: `Reversal — ${paired.description}`,
+                description: `Reversal — ${paired.description} [${reason}]`,
                 category: "Transfer" as const,
                 amount: -paired.amount,
                 status: "Posted" as const,
                 reference: `REV-${randomDigits(6)}`,
                 createdBy: "Administration",
+                failureReason: reason,
+                failureDetails: `Reversed by administration: ${reason}`,
               }]
             : []),
         ];

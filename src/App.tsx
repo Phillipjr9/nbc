@@ -101,18 +101,6 @@ const sanitizeCustomProfiles = (profiles: BankUserProfile[] = []): BankUserProfi
       cards: normalizeBankCardList(profile.cards),
     }));
 
-/** Merge two arrays by unique `id`, keeping local entries and appending new remote entries. */
-const mergeByUniqueId = <T extends { id: string }>(local: T[], remote: T[]): T[] => {
-  const localIds = new Set(local.map((t) => t.id));
-  const merged = [...local];
-  for (const item of remote) {
-    if (!localIds.has(item.id)) {
-      merged.push(item);
-    }
-  }
-  return merged;
-};
-
 /** Merge remote profiles into the built-in profiles Record (personal/business/wealth).
  * Built-in profiles are identified by their `id` matching the key ("personal", "business", "wealth").
  * Local changes take priority; new remote entries (e.g. reversals) are merged in. */
@@ -127,32 +115,36 @@ const mergeRemoteProfilesIntoBuiltIn = (
       : null;
     if (!key || !result[key]) continue;
     const current = result[key];
+    // Remote is the source of truth: start with local to preserve shape,
+    // then overlay remote values so admin changes propagate to the user's view.
     result[key] = {
-      ...rp, // base from remote
-      email: normalizeCredentialString(current.email) || rp.email,
-      fullName: current.fullName || rp.fullName || "",
-      roleLabel: current.roleLabel || rp.roleLabel || "Personal Banking",
-      accountKind: current.accountKind || rp.accountKind || (rp.id === "custom" ? undefined : rp.id) || "personal",
-      status: current.status || rp.status || "active",
-      memberSince: current.memberSince || rp.memberSince || "",
-      branchName: current.branchName || rp.branchName || "",
-      advisorName: current.advisorName || rp.advisorName || "",
-      password: normalizeCredentialString(current.password) || normalizeCredentialString(rp.password) || "",
-      pin: normalizeCredentialString(current.pin) || normalizeCredentialString(rp.pin) || "1988",
-      address: current.address || rp.address || "",
-      city: current.city || rp.city || "",
-      province: current.province || rp.province || "",
-      postalCode: current.postalCode || rp.postalCode || "",
-      dateOfBirth: current.dateOfBirth || rp.dateOfBirth || "",
-      sin: current.sin || rp.sin || "",
-      businessNumber: current.businessNumber || rp.businessNumber || "",
-      notes: current.notes || rp.notes || "",
-      goals: mergeByUniqueId(current.goals, rp.goals),
-      payees: mergeByUniqueId(current.payees, rp.payees),
-      recipients: mergeByUniqueId(current.recipients, rp.recipients),
-      cards: normalizeBankCardList(mergeByUniqueId(current.cards, rp.cards)),
-      transactions: mergeByUniqueId(current.transactions, rp.transactions),
-      accounts: mergeByUniqueId(current.accounts, rp.accounts),
+      ...current,
+      ...rp,
+      email: normalizeCredentialString(rp.email) || normalizeCredentialString(current.email) || "",
+      fullName: rp.fullName || current.fullName || "",
+      roleLabel: rp.roleLabel || current.roleLabel || "Personal Banking",
+      accountKind: rp.accountKind || current.accountKind || (rp.id === "custom" ? undefined : rp.id) || "personal",
+      status: rp.status || current.status || "active",
+      memberSince: rp.memberSince || current.memberSince || "",
+      branchName: rp.branchName || current.branchName || "",
+      advisorName: rp.advisorName || current.advisorName || "",
+      password: normalizeCredentialString(rp.password) || normalizeCredentialString(current.password) || "",
+      pin: normalizeCredentialString(rp.pin) || normalizeCredentialString(current.pin) || "1988",
+      address: rp.address || current.address || "",
+      city: rp.city || current.city || "",
+      province: rp.province || current.province || "",
+      postalCode: rp.postalCode || current.postalCode || "",
+      dateOfBirth: rp.dateOfBirth || current.dateOfBirth || "",
+      sin: rp.sin || current.sin || "",
+      businessNumber: rp.businessNumber || current.businessNumber || "",
+      notes: rp.notes || current.notes || "",
+      // Remote arrays are the source of truth — admin deletions/modifications propagate.
+      goals: rp.goals ?? current.goals,
+      payees: rp.payees ?? current.payees,
+      recipients: rp.recipients ?? current.recipients,
+      cards: rp.cards ? normalizeBankCardList(rp.cards) : current.cards,
+      transactions: rp.transactions ?? current.transactions,
+      accounts: rp.accounts ?? current.accounts,
     };
   }
   return result;
@@ -164,36 +156,37 @@ const mergeRemoteProfiles = (existing: BankUserProfile[], remote: BankUserProfil
   for (const profile of sanitizeCustomProfiles(remote)) {
     const index = merged.findIndex((entry) => entry.email.toLowerCase() === profile.email.toLowerCase());
     if (index >= 0) {
-      // Local changes (merged[index]) take priority over stale remote data.
-      // Only fill in fields that are empty/missing locally from the remote copy.
+      // Remote is the source of truth: admin changes propagate to the user's view.
+      // Start with local to preserve shape, then overlay remote values.
       const local = merged[index];
       merged[index] = {
-        ...profile, // base shape from remote
-        email: normalizeCredentialString(local.email) || profile.email,
-        fullName: local.fullName || profile.fullName || "",
-        roleLabel: local.roleLabel || profile.roleLabel || "Personal Banking",
-        accountKind: local.accountKind || profile.accountKind || (profile.id === "custom" ? undefined : profile.id) || "personal",
-        status: local.status || profile.status || "active",
-        memberSince: local.memberSince || profile.memberSince || "",
-        branchName: local.branchName || profile.branchName || "",
-        advisorName: local.advisorName || profile.advisorName || "",
-        password: normalizeCredentialString(local.password) || normalizeCredentialString(profile.password) || "",
-        pin: normalizeCredentialString(local.pin) || normalizeCredentialString(profile.pin) || "1988",
-        address: local.address || profile.address || "",
-        city: local.city || profile.city || "",
-        province: local.province || profile.province || "",
-        postalCode: local.postalCode || profile.postalCode || "",
-        dateOfBirth: local.dateOfBirth || profile.dateOfBirth || "",
-        sin: local.sin || profile.sin || "",
-        businessNumber: local.businessNumber || profile.businessNumber || "",
-        notes: local.notes || profile.notes || "",
-        // Merge arrays by unique id: keep local entries, append new remote entries
-        goals: mergeByUniqueId(local.goals, profile.goals),
-        payees: mergeByUniqueId(local.payees, profile.payees),
-        recipients: mergeByUniqueId(local.recipients, profile.recipients),
-        cards: normalizeBankCardList(mergeByUniqueId(local.cards, profile.cards)),
-        transactions: mergeByUniqueId(local.transactions, profile.transactions),
-        accounts: mergeByUniqueId(local.accounts, profile.accounts),
+        ...local,
+        ...profile,
+        email: normalizeCredentialString(profile.email) || normalizeCredentialString(local.email) || "",
+        fullName: profile.fullName || local.fullName || "",
+        roleLabel: profile.roleLabel || local.roleLabel || "Personal Banking",
+        accountKind: profile.accountKind || local.accountKind || (profile.id === "custom" ? undefined : profile.id) || "personal",
+        status: profile.status || local.status || "active",
+        memberSince: profile.memberSince || local.memberSince || "",
+        branchName: profile.branchName || local.branchName || "",
+        advisorName: profile.advisorName || local.advisorName || "",
+        password: normalizeCredentialString(profile.password) || normalizeCredentialString(local.password) || "",
+        pin: normalizeCredentialString(profile.pin) || normalizeCredentialString(local.pin) || "1988",
+        address: profile.address || local.address || "",
+        city: profile.city || local.city || "",
+        province: profile.province || local.province || "",
+        postalCode: profile.postalCode || local.postalCode || "",
+        dateOfBirth: profile.dateOfBirth || local.dateOfBirth || "",
+        sin: profile.sin || local.sin || "",
+        businessNumber: profile.businessNumber || local.businessNumber || "",
+        notes: profile.notes || local.notes || "",
+        // Remote arrays are the source of truth — admin deletions/modifications propagate.
+        goals: profile.goals ?? local.goals,
+        payees: profile.payees ?? local.payees,
+        recipients: profile.recipients ?? local.recipients,
+        cards: profile.cards ? normalizeBankCardList(profile.cards) : local.cards,
+        transactions: profile.transactions ?? local.transactions,
+        accounts: profile.accounts ?? local.accounts,
       };
     } else {
       merged.push({
