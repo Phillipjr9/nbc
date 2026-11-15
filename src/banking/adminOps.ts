@@ -17,18 +17,6 @@ export type ManagedUserEntry = {
   profile: BankUserProfile;
 };
 
-export type AdminTabId =
-  | "overview"
-  | "clients"
-  | "accounts"
-  | "transactions"
-  | "cards"
-  | "support"
-  | "operations"
-  | "approvals"
-  | "config"
-  | "audit";
-
 /* ------------------------------------------------------------------ *
  * Administrator identity, roles & permissions
  * ------------------------------------------------------------------ */
@@ -160,12 +148,29 @@ export type ApprovalRequest = {
   decidedBy?: string;
 };
 
+export type AdminTabId =
+  | "overview"
+  | "clients"
+  | "accounts"
+  | "transactions"
+  | "cards"
+  | "support"
+  | "operations"
+  | "approvals"
+  | "config"
+  | "audit";
+
 export type AdminPanelProps = {
   ops: AdminOps;
   selectedKey: string;
   onSelectKey: (key: string) => void;
   onOpenTab: (tab: AdminTabId, key?: string) => void;
   autoCreate?: number;
+  /**
+   * Shows a single client's conversation instead of the whole inbox. Used by the
+   * client workspace, where Support is one of that client's own tabs.
+   */
+  focusedClientKey?: string;
 };
 
 export type AdminOps = {
