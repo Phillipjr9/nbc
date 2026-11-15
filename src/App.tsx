@@ -107,13 +107,36 @@ const mergeRemoteProfiles = (existing: BankUserProfile[], remote: BankUserProfil
   for (const profile of sanitizeCustomProfiles(remote)) {
     const index = merged.findIndex((entry) => entry.email.toLowerCase() === profile.email.toLowerCase());
     if (index >= 0) {
+      // Local changes (merged[index]) take priority over stale remote data.
+      // Only fill in fields that are empty/missing locally from the remote copy.
+      const local = merged[index];
       merged[index] = {
-        ...merged[index],
-        ...profile,
-        email: normalizeCredentialString(profile.email) || merged[index].email,
-        password: normalizeCredentialString(profile.password) || merged[index].password,
-        pin: normalizeCredentialString(profile.pin) || merged[index].pin || "1988",
-        cards: normalizeBankCardList(profile.cards ?? merged[index].cards ?? []),
+        ...profile, // base shape from remote
+        email: normalizeCredentialString(local.email) || profile.email,
+        fullName: local.fullName || profile.fullName || "",
+        roleLabel: local.roleLabel || profile.roleLabel || "Personal Banking",
+        accountKind: local.accountKind || profile.accountKind || (profile.id === "custom" ? undefined : profile.id) || "personal",
+        status: local.status || profile.status || "active",
+        memberSince: local.memberSince || profile.memberSince || "",
+        branchName: local.branchName || profile.branchName || "",
+        advisorName: local.advisorName || profile.advisorName || "",
+        password: normalizeCredentialString(local.password) || normalizeCredentialString(profile.password) || "",
+        pin: normalizeCredentialString(local.pin) || normalizeCredentialString(profile.pin) || "1988",
+        address: local.address || profile.address || "",
+        city: local.city || profile.city || "",
+        province: local.province || profile.province || "",
+        postalCode: local.postalCode || profile.postalCode || "",
+        dateOfBirth: local.dateOfBirth || profile.dateOfBirth || "",
+        sin: local.sin || profile.sin || "",
+        businessNumber: local.businessNumber || profile.businessNumber || "",
+        notes: local.notes || profile.notes || "",
+        goals: local.goals.length > 0 ? local.goals : profile.goals,
+        payees: local.payees.length > 0 ? local.payees : profile.payees,
+        recipients: local.recipients.length > 0 ? local.recipients : profile.recipients,
+        cards: normalizeBankCardList(local.cards.length > 0 ? local.cards : profile.cards),
+        // Transactions: local always wins — admin/recent changes must not be overwritten
+        transactions: local.transactions.length > 0 ? local.transactions : profile.transactions,
+        accounts: local.accounts.length > 0 ? local.accounts : profile.accounts,
       };
     } else {
       merged.push({
@@ -403,14 +426,26 @@ export default function App() {
     });
 
     if (key === "personal" || key === "business" || key === "wealth") {
-      setProfiles((prev) => ({
-        ...prev,
-        [key]: normalizeProfile(updater(prev[key])),
-      }));
+      setProfiles((prev) => {
+        const next = normalizeProfile(updater(prev[key]));
+        // Persist to Supabase so remote sync cannot overwrite admin changes
+        if (isSupabaseConfigured) {
+          upsertProfile(next).catch((err) => console.warn("Supabase profile upsert failed:", err.message));
+        }
+        return { ...prev, [key]: next };
+      });
     } else {
-      setCustomProfiles((prev) =>
-        prev.map((cp) => (cp.email.toLowerCase() === key.toLowerCase() ? normalizeProfile(updater(cp)) : cp))
-      );
+      setCustomProfiles((prev) => {
+        const next = prev.map((cp) =>
+          cp.email.toLowerCase() === key.toLowerCase() ? normalizeProfile(updater(cp)) : cp
+        );
+        // Persist to Supabase so remote sync cannot overwrite admin changes
+        const updated = next.find((cp) => cp.email.toLowerCase() === key.toLowerCase());
+        if (isSupabaseConfigured && updated) {
+          upsertProfile(updated).catch((err) => console.warn("Supabase profile upsert failed:", err.message));
+        }
+        return next;
+      });
     }
     if (logAction && logDetail) {
       appendAudit(logAction, logDetail, severity);
