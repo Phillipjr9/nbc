@@ -28,7 +28,15 @@ const replyTemplates = [
  * customer only ever sees "Support". Nothing entered here is exposed to the
  * client except the message body.
  */
-export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
+export default function AdminSupport({
+  ops,
+  selectedKey,
+  onSelectKey,
+  onOpenTab,
+  focusedClientKey,
+}: AdminPanelProps) {
+  // One client's conversation (inside their own file) or the whole inbox.
+  const focused = focusedClientKey ?? null;
   const [search, setSearch] = useState("");
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [draft, setDraft] = useState("");
@@ -79,7 +87,11 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
     );
   });
 
-  const activeKey = filtered.some((row) => row.key === selectedKey) ? selectedKey : filtered[0]?.key ?? "";
+  const activeKey = focused
+    ? focused
+    : filtered.some((row) => row.key === selectedKey)
+      ? selectedKey
+      : filtered[0]?.key ?? "";
   const active = rows.find((row) => row.key === activeKey) ?? null;
   const totalUnread = rows.reduce((sum, row) => sum + row.unread, 0);
   const awaitingCount = rows.filter((row) => row.awaiting).length;
@@ -126,9 +138,13 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[25px] font-bold text-nbc-navy sm:text-[28px]">Support inbox</h1>
+          <h1 className={`${focused ? "text-[19px]" : "text-[25px] sm:text-[28px]"} font-bold text-nbc-navy`}>
+            {focused ? "Support conversation" : "Support inbox"}
+          </h1>
           <p className="mt-1 text-[13.5px] text-[#565656]">
-            Private conversations with clients. They see these messages as “National Bank Support”.
+            {focused
+              ? "This client's own conversation. They see these messages as “National Bank Support”."
+              : "Private conversations with clients. They see these messages as “National Bank Support”."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -148,8 +164,9 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-12">
-        {/* Thread list */}
+      <div className={`grid gap-4 ${focused ? "" : "lg:grid-cols-12"}`}>
+        {/* Thread list — hidden when the workspace shows one client's file */}
+        {!focused && (
         <div className="overflow-hidden rounded-[6px] border border-[#e5e2da] bg-white lg:col-span-4">
           <div className="border-b border-[#efefef] p-3">
             <div className="relative">
@@ -228,9 +245,10 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
             })}
           </ul>
         </div>
+        )}
 
         {/* Conversation */}
-        <div className="flex min-h-[520px] flex-col overflow-hidden rounded-[6px] border border-[#e5e2da] bg-white lg:col-span-8">
+        <div className={`flex min-h-[520px] flex-col overflow-hidden rounded-[6px] border border-[#e5e2da] bg-white ${focused ? "" : "lg:col-span-8"}`}>
           {!active ? (
             <p className="m-auto p-8 text-center text-[13px] text-[#777]">Select a client to open their conversation.</p>
           ) : (
@@ -242,10 +260,19 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
                     {active.email} · {active.role}
                   </p>
                 </div>
-                <div className="flex flex-none items-center gap-2 text-[11px]">
-                  <span className="rounded-full bg-[#f4f1ea] px-2.5 py-1 font-semibold text-[#565656]">
+                <div className="flex flex-none flex-wrap items-center gap-2 text-[11px]">
+                  <span className="hidden rounded-full bg-[#f4f1ea] px-2.5 py-1 font-semibold text-[#565656] sm:inline">
                     Client sees “National Bank Support”
                   </span>
+                  {onOpenTab && !focused && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenTab("clients", active.key)}
+                      className="rounded-full border border-[#c9c3b6] px-2.5 py-1 font-semibold text-nbc-navy transition hover:border-nbc-navy"
+                    >
+                      Open client file
+                    </button>
+                  )}
                 </div>
               </header>
 
