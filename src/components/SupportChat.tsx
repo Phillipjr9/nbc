@@ -8,11 +8,13 @@ import {
   appendSupportMessage,
   formatSupportDay,
   formatSupportTime,
+  isWithSpecialist,
   markSupportThreadRead,
+  startSpecialistHandoff,
   supportThreadOf,
   unreadSupportCount,
 } from "../banking/supportChat";
-import { generateSupportReply } from "../banking/supportAssistant";
+import { planSupportTurn } from "../banking/supportAssistant";
 import {
   PUBLIC_QUICK_STARTS,
   answerPublicQuestion,
@@ -58,6 +60,22 @@ type ChatItem = {
 
 const newId = () => `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const nowIso = () => new Date().toISOString();
+
+/** Headset icon used by the "talk to a person" control. */
+function SpecialistIcon({ className = "h-3.5 w-3.5" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path
+        d="M4 13v-1a8 8 0 0 1 16 0v1M4 13a2 2 0 0 1 2-2h1v6H6a2 2 0 0 1-2-2v-2Zm16 0a2 2 0 0 0-2-2h-1v6h1a2 2 0 0 0 2-2v-2Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M17 18a4 4 0 0 1-4 3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function SupportAvatar({ size = 36 }: { size?: number }) {
   return (
@@ -135,6 +153,8 @@ export default function SupportChat({
 
   const thread = useMemo(() => (profile ? supportThreadOf(profile) : []), [profile]);
   const unread = profile ? unreadSupportCount(profile, "client") : 0;
+  /** True once the client asked for a person: the assistant stops answering. */
+  const withSpecialist = isWithSpecialist(profile);
   const items: ChatItem[] = useMemo(() => {
     if (profile) {
       return thread.map((message) => ({
@@ -249,18 +269,32 @@ export default function SupportChat({
 
     if (!onUpdateProfile) return;
 
-    const answer = generateSupportReply(profile, body, thread);
-    onUpdateProfile((prev) => appendSupportMessage(prev, "client", body, { awaitingDesk: answer.escalate }));
+    const plan = planSupportTurn(profile, body, thread);
+    onUpdateProfile((prev) => appendSupportMessage(prev, "client", body, { awaitingDesk: plan.awaitingDesk }));
     setDraft("");
+
+    // Straight to the desk: no assistant beat, no invented reply.
+    if (!plan.reply) return;
+
     setTyping(true);
 
     // A short "typing" beat keeps the conversation feeling live.
     const delay = 700 + Math.min(900, body.length * 12);
     const timer = window.setTimeout(() => {
-      onUpdateProfile((prev) => appendSupportMessage(prev, "support", answer.reply, { automated: true }));
+      onUpdateProfile((prev) => appendSupportMessage(prev, "support", plan.reply as string, { automated: true }));
       setTyping(false);
     }, delay);
     timers.current.push(timer);
+  };
+
+  /**
+   * Hands the conversation to a person: the request is stored as a client
+   * message that needs the desk, and every later message skips the assistant.
+   */
+  const talkToSpecialist = () => {
+    if (!onUpdateProfile) return;
+    onUpdateProfile((prev) => startSpecialistHandoff(prev));
+    window.setTimeout(() => inputRef.current?.focus(), 80);
   };
 
   const quickStarts = profile ? clientQuickStarts : PUBLIC_QUICK_STARTS;
@@ -318,6 +352,23 @@ export default function SupportChat({
             </button>
           </header>
 
+          {profile &&
+            (withSpecialist ? (
+              <p className="flex items-center justify-center gap-1.5 border-b border-[#dcefdf] bg-[#f1fbf3] px-3 py-2 text-[11px] font-semibold text-[#1d6b37]">
+                <span className="h-1.5 w-1.5 flex-none rounded-full bg-[#22c55e]" />
+                You&rsquo;re with a specialist &mdash; replies can take a few minutes
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={talkToSpecialist}
+                className="flex w-full items-center justify-center gap-2 border-b border-[#ece8df] bg-[#fdfbf6] px-3 py-2 text-[11.5px] font-semibold text-nbc-navy transition hover:bg-[#f5f0e5]"
+              >
+                <SpecialistIcon />
+                Talk to a person now
+              </button>
+            ))}
+
           <div
             ref={listRef}
             className="flex-1 space-y-3 overflow-y-auto bg-[#f5f3ee] px-3.5 py-4"
@@ -348,6 +399,14 @@ export default function SupportChat({
                       {start}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    onClick={talkToSpecialist}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-nbc-navy px-2.5 py-1 text-[11.5px] font-semibold text-nbc-navy transition hover:bg-nbc-navy hover:text-white"
+                  >
+                    <SpecialistIcon className="h-3 w-3" />
+                    Talk to a person
+                  </button>
                 </div>
               </div>
             )}
@@ -485,10 +544,19 @@ export default function SupportChat({
               </button>
             </div>
             <p className="mt-1.5 px-1 text-[10.5px] leading-[15px] text-[#8a8a8a]">
-              {profile
-                ? `${SUPPORT_SHORT_NAME} replies instantly and can bring in a specialist at any time. Saved to your profile.`
-                : `${SUPPORT_SHORT_NAME} answers 24/7. Sign in and we can look at your own file.`}{" "}
-              <span className="whitespace-nowrap">Automated assistance may be used.</span>
+              {profile && withSpecialist ? (
+                <>
+                  You&rsquo;re chatting with a specialist. Messages are saved to your profile so you can pick
+                  up on any device.
+                </>
+              ) : (
+                <>
+                  {profile
+                    ? `${SUPPORT_SHORT_NAME} replies instantly and can bring in a specialist at any time. Saved to your profile.`
+                    : `${SUPPORT_SHORT_NAME} answers 24/7. Sign in and we can look at your own file.`}{" "}
+                  <span className="whitespace-nowrap">Automated assistance may be used.</span>
+                </>
+              )}
             </p>
           </form>
         </section>

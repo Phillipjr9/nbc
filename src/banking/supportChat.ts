@@ -59,6 +59,35 @@ export function appendSupportMessage(
   return { ...profile, supportThread: sortThread([...supportThreadOf(profile), message]) };
 }
 
+/** Shown to the client when they ask for a person; the desk sees the same text. */
+export const SUPPORT_HANDOFF_ACK =
+  "Of course — a Support specialist is joining this conversation now. Anything you type from here goes straight to them. During busy periods it can take a few minutes, and you can keep typing in the meantime.";
+
+/** True once the client has asked to speak to a person. */
+export function isWithSpecialist(profile: BankUserProfile | null | undefined): boolean {
+  return profile?.supportHandoff === true;
+}
+
+/**
+ * Puts the client through to the Support desk.
+ *
+ * This is the "talk to Support directly" path: the request itself is stored as a
+ * normal client message flagged `awaitingDesk` (so it raises the desk badge and
+ * the chime immediately), and the profile keeps `supportHandoff` so the
+ * assistant stops answering first and every later message goes straight to the
+ * desk. Nothing here names an administrator — the client stays with "Support".
+ */
+export function startSpecialistHandoff(profile: BankUserProfile): BankUserProfile {
+  if (profile.supportHandoff) return profile;
+
+  const handed: BankUserProfile = { ...profile, supportHandoff: true };
+  const asked = appendSupportMessage(handed, "client", "I'd like to speak with a Support specialist, please.", {
+    awaitingDesk: true,
+  });
+
+  return appendSupportMessage(asked, "support", SUPPORT_HANDOFF_ACK, { automated: true });
+}
+
 /**
  * Marks one side's messages as read.
  * Returns the original profile when nothing changed, so React state does not

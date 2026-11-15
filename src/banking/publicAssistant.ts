@@ -14,6 +14,7 @@
 export type PublicLink = { label: string; href: string };
 
 export type PublicTopic =
+  | "person"
   | "rates"
   | "appointment"
   | "card_safety"
@@ -32,6 +33,7 @@ export type PublicAnswer = {
 
 /** Shortcuts offered in an empty conversation with a signed-out visitor. */
 export const PUBLIC_QUICK_STARTS = [
+  "Talk to a person",
   "Today's rates",
   "Book an appointment",
   "Lost or stolen card",
@@ -48,6 +50,19 @@ export function publicGreeting(): string {
 /** Answers a general question from a visitor who is not signed in. */
 export function answerPublicQuestion(raw: string): PublicAnswer {
   const q = raw.toLowerCase();
+
+  // Explicit request for a person: give the real channels, before anything else.
+  if (/(person|human|agent|representative|specialist|someone|talk to|speak to|call me)/.test(q)) {
+    return {
+      topic: "person",
+      reply:
+        "Happy to put you through. The quickest ways to reach a person:\n• Call 1-888-835-6281 (Canada/U.S.) or 1-514-394-5000 (elsewhere) — 24/7\n• Sign in and open Support chat, then choose “Talk to a person now”: a specialist joins the conversation and replies there.\n• Book an appointment in branch, by phone or by video.",
+      links: [
+        { label: "Contact us", href: "https://www.nbc.ca/contact-us.html" },
+        { label: "Sign in to chat with Support", href: "https://app.bnc.ca/?lang=en" },
+      ],
+    };
+  }
 
   if (/(rate|interest|prime|mortgage rate|saving rate)/.test(q)) {
     return {

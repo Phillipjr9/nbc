@@ -16,6 +16,7 @@ describe("answerPublicQuestion", () => {
 
   it("routes each common visitor question to its own topic", () => {
     const cases: Array<[string, string]> = [
+      ["I want to talk to a person", "person"],
       ["I want to book an appointment", "appointment"],
       ["I lost my card", "card_safety"],
       ["How do I open an account?", "open_account"],
@@ -69,5 +70,20 @@ describe("answerPublicQuestion", () => {
     for (const shortcut of PUBLIC_QUICK_STARTS) {
       expect(answerPublicQuestion(shortcut).reply.length).toBeGreaterThan(10);
     }
+  });
+});
+
+describe("talking to a person from the public site", () => {
+  it("gives the real channels instead of a canned answer", () => {
+    const answer = answerPublicQuestion("Talk to a person");
+    expect(answer.topic).toBe("person");
+    expect(answer.reply).toMatch(/1-888-835-6281/);
+    expect(answer.reply).toMatch(/Support chat/);
+    expect(answer.reply).toMatch(/Talk to a person now/);
+    expect(answer.links?.length).toBeGreaterThan(0);
+  });
+
+  it("is offered as a first shortcut", () => {
+    expect(PUBLIC_QUICK_STARTS[0]).toBe("Talk to a person");
   });
 });

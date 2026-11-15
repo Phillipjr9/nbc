@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import SupportChat from "../components/SupportChat";
 import { INITIAL_PROFILES } from "../banking/bankingTypes";
-import { appendSupportMessage } from "../banking/supportChat";
+import { appendSupportMessage, startSpecialistHandoff } from "../banking/supportChat";
 import { ensureProfileShape } from "../lib/profileNormalize";
 import type { BankUserProfile } from "../banking/bankingTypes";
 
@@ -58,5 +58,20 @@ describe("SupportChat widget", () => {
     // No unread badge and no account-specific promise when signed out.
     expect(markup).not.toContain("unread message");
     expect(markup).not.toMatch(/administrator|back ?office|admin\b/i);
+  });
+});
+
+describe("talking to Support directly", () => {
+  it("offers the direct route in an open conversation", () => {
+    const markup = renderToStaticMarkup(<SupportChat profile={clientProfile()} defaultOpen />);
+    expect(markup).toContain("Talk to a person now");
+  });
+
+  it("swaps it for a status line once the client is with a specialist", () => {
+    const markup = renderToStaticMarkup(
+      <SupportChat profile={startSpecialistHandoff(clientProfile())} defaultOpen />
+    );
+    expect(markup).not.toContain("Talk to a person now");
+    expect(markup).toMatch(/with a specialist/);
   });
 });
