@@ -1,6 +1,6 @@
 import type { BankUserProfile, SupportMessage, Transaction } from "./bankingTypes";
 import { formatMoney } from "./bankingTypes";
-import { formatSupportDay, supportThreadOf } from "./supportChat";
+import { formatSupportDay, isWithSpecialist, supportThreadOf } from "./supportChat";
 
 /**
  * Support assistant ("AI support").
@@ -332,6 +332,44 @@ export function generateSupportReply(
 /* ------------------------------------------------------------------ *
  * Desk-side assistance
  * ------------------------------------------------------------------ */
+
+/**
+ * Decides what happens to one message the client just typed.
+ *
+ * Two paths:
+ *  - the conversation is with the assistant, so it answers first and only
+ *    escalates when it cannot resolve the request;
+ *  - the client asked to talk to a person (`profile.supportHandoff`), so the
+ *    message goes straight to the Support desk and the assistant stays silent.
+ */
+export type SupportTurnPlan = {
+  /** Mark the client message `awaitingDesk` so the desk badge and chime fire. */
+  awaitingDesk: boolean;
+  /** The assistant reply to show, or null when the message is desk-only. */
+  reply: string | null;
+  intent: AssistantIntent | "handoff";
+  confidence: number;
+  tags: string[];
+};
+
+export function planSupportTurn(
+  profile: BankUserProfile,
+  message: string,
+  history: SupportMessage[] = supportThreadOf(profile)
+): SupportTurnPlan {
+  if (isWithSpecialist(profile)) {
+    return { awaitingDesk: true, reply: null, intent: "handoff", confidence: 1, tags: ["handoff", "with-specialist"] };
+  }
+
+  const answer = generateSupportReply(profile, message, history);
+  return {
+    awaitingDesk: answer.escalate,
+    reply: answer.reply,
+    intent: answer.intent,
+    confidence: answer.confidence,
+    tags: answer.tags,
+  };
+}
 
 export type DeskAssist = {
   summary: string;

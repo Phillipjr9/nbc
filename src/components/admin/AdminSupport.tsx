@@ -51,10 +51,14 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
             last: thread.length > 0 ? thread[thread.length - 1] : null,
             unread: unreadSupportCount(entry.profile, "support"),
             awaiting: needsSupportReply(entry.profile),
+            // A client who asked for a person jumps the queue.
+            askedForSpecialist: entry.profile.supportHandoff === true,
           };
         })
         .sort((a, b) => {
-          // Waiting clients first, then most recent activity, then name.
+          // Clients waiting on a person first, then anyone else waiting, then
+          // most recent activity, then name.
+          if (a.askedForSpecialist !== b.askedForSpecialist) return a.askedForSpecialist ? -1 : 1;
           if (a.awaiting !== b.awaiting) return a.awaiting ? -1 : 1;
           const aTime = a.last?.createdAt ?? "";
           const bTime = b.last?.createdAt ?? "";
@@ -200,6 +204,11 @@ export default function AdminSupport({ ops, selectedKey, onSelectKey }: AdminPan
                       {row.awaiting && (
                         <span className="mt-1 inline-block rounded-full bg-amber-100 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.06em] text-amber-900">
                           Needs reply
+                        </span>
+                      )}
+                      {row.askedForSpecialist && (
+                        <span className="ml-1 mt-1 inline-block rounded-full bg-indigo-100 px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.06em] text-indigo-800">
+                          Asked for a specialist
                         </span>
                       )}
                       {!row.awaiting && row.last?.side === "support" && row.last.automated && (

@@ -372,6 +372,11 @@ export type BankUserProfile = {
   scheduled?: ScheduledTransfer[];
   /** Private support conversation with the Support desk. */
   supportThread?: SupportMessage[];
+  /**
+   * Set once the client asks to speak to a person. From then on their messages
+   * skip the assistant and go straight to the Support desk.
+   */
+  supportHandoff?: boolean;
 };
 
 export const INITIAL_PROFILES: Record<"personal" | "business" | "wealth", BankUserProfile> = {

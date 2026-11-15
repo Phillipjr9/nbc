@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { INITIAL_PROFILES } from "../banking/bankingTypes";
 import type { BankUserProfile, SupportMessage, Transaction } from "../banking/bankingTypes";
-import { draftDeskAssist, generateSupportReply } from "../banking/supportAssistant";
-import { appendSupportMessage } from "../banking/supportChat";
+import { draftDeskAssist, generateSupportReply, planSupportTurn } from "../banking/supportAssistant";
+import { appendSupportMessage, startSpecialistHandoff, supportThreadOf } from "../banking/supportChat";
 import { ensureProfileShape } from "../lib/profileNormalize";
 
 /** A clean ledger: no same-description/same-amount pair, so duplicate detection
@@ -154,5 +154,42 @@ describe("draftDeskAssist", () => {
     const assist = draftDeskAssist(fixture());
     expect(assist.summary).toMatch(/No client messages/);
     expect(assist.suggestedReply.length).toBeGreaterThan(0);
+  });
+});
+
+describe("planSupportTurn", () => {
+  it("lets the assistant answer a question it can resolve", () => {
+    const profile = fixture();
+    const plan = planSupportTurn(profile, "What is my balance?", []);
+
+    expect(plan.awaitingDesk).toBe(false);
+    expect(plan.reply).toMatch(/\$/);
+    expect(plan.intent).toBe("balance");
+  });
+
+  it("escalates and still answers when the assistant cannot resolve it", () => {
+    const plan = planSupportTurn(fixture(), "I lost my card yesterday", []);
+    expect(plan.awaitingDesk).toBe(true);
+    expect(plan.reply).toBeTruthy();
+    expect(plan.intent).toBe("card_lost");
+  });
+
+  it("stays out of the way once the client asked for a person", () => {
+    const profile = startSpecialistHandoff(fixture());
+    const plan = planSupportTurn(profile, "What is my balance?", supportThreadOf(profile));
+
+    expect(plan.awaitingDesk).toBe(true);
+    expect(plan.reply).toBeNull();
+    expect(plan.intent).toBe("handoff");
+    expect(plan.tags).toContain("with-specialist");
+  });
+
+  it("routes every later message straight to the desk", () => {
+    const profile = startSpecialistHandoff(fixture());
+    for (const message of ["hello", "my card was declined", "what is my balance?", "thanks"]) {
+      const plan = planSupportTurn(profile, message, supportThreadOf(profile));
+      expect(plan.awaitingDesk, message).toBe(true);
+      expect(plan.reply, message).toBeNull();
+    }
   });
 });

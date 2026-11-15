@@ -96,6 +96,34 @@ conversation:
 - Thread list chips: **Needs reply** for escalated chats, **Handled by
   assistant** when the last message came from the assistant.
 
+## Talking to Support directly
+
+The assistant answers first, but the client is never trapped behind it.
+
+| Where | Control | What happens |
+| --- | --- | --- |
+| Signed-in widget | **“Talk to a person now”** bar under the header | `startSpecialistHandoff()` stores a client message flagged `awaitingDesk` and sets `supportHandoff` on the profile |
+| Signed-in widget, empty thread | **“Talk to a person”** chip | Same |
+| Signed out, public site | **“Talk to a person”** shortcut (first chip) | `publicAssistant` gives the 24/7 phone numbers, the contact page and the sign-in route to the chat |
+| Sign-in / help pages | Existing “Chat with Support” buttons | Open the same widget |
+
+Once `supportHandoff` is set:
+
+- `planSupportTurn()` stops calling the assistant: `reply` is `null`, so **every** later
+  message goes to the desk with `awaitingDesk: true` — no assistant reply, no
+  invented answer, no “typing” beat from the assistant.
+- The client sees a green status line: *“You're with a specialist — replies can
+  take a few minutes”*, and the footer drops the automation note in favour of
+  “You're chatting with a specialist”.
+- Support sends one acknowledgement (`SUPPORT_HANDOFF_ACK`) so the client is not
+  left staring at a silent panel. It is stored with `automated: true` for the
+  desk's benefit only — the client just sees a Support message.
+- The desk inbox sorts these clients to the top and tags them **“Asked for a
+  specialist”**, and the normal unread badge + chime fire on the request itself.
+
+Anonymity holds: the client is told “a Support specialist”, never an
+administrator, agent name, bot or model.
+
 ## Back-office side
 
 | File | Role |
@@ -149,7 +177,10 @@ conversation:
    ready-to-send reply. Send it.
 4. Back in the client dashboard the specialist's reply lands immediately (one
    realtime broadcast, ~1 s) and still reads as **Support**.
-5. Sign out and press the same **Support** button on the marketing site: the
+5. In the same conversation press **Talk to a person now**: the assistant stops
+   answering, a specialist acknowledgement appears, and every message from then
+   on lands in the desk inbox (sorted first, tagged “Asked for a specialist”).
+6. Sign out and press the same **Support** button on the marketing site: the
    panel answers “Today's rates”, “Book an appointment”, “Lost or stolen card”
    and “Open an account” without needing an account.
 
@@ -161,7 +192,8 @@ conversation:
 | --- | --- |
 | `src/__tests__/supportAssistant.test.ts` | Every escalation rule, the no-escalation answers, balances quoted from the client's own accounts, no back-office identity in any reply, desk briefing |
 | `src/__tests__/publicAssistant.test.ts` | The signed-out topics and their links, greetings, and that nothing names a bot, model or staff member |
-| `src/__tests__/supportChat.test.ts` | Thread append/read/merge, desk notification gating (`awaitingDesk` only), idempotent read marks, ordering |
+| `src/__tests__/supportChat.test.ts` | Thread append/read/merge, desk notification gating (`awaitingDesk` only), idempotent read marks, ordering, the specialist handoff |
+| `src/__tests__/supportChatWidget.test.tsx` | One launcher only, the direct “Talk to a person now” control, and the specialist status line replacing it |
 | `src/__tests__/dates.test.ts` | Local-calendar ledger dates (the “history moved by a day” bug) |
 | `src/__tests__/profileNormalize.test.ts` | Partial/legacy profile repair, the write-back guard, ledger sort |
 

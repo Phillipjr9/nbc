@@ -3,9 +3,11 @@ import { INITIAL_PROFILES } from "../banking/bankingTypes";
 import type { BankUserProfile, SupportMessage } from "../banking/bankingTypes";
 import {
   appendSupportMessage,
+  isWithSpecialist,
   markSupportThreadRead,
   mergeSupportThreads,
   needsSupportReply,
+  startSpecialistHandoff,
   supportThreadOf,
   unreadSupportCount,
 } from "../banking/supportChat";
@@ -156,5 +158,40 @@ describe("mergeSupportThreads", () => {
       mergeSupportThreads([{ id: "x", side: "client" } as unknown as SupportMessage], undefined)
     ).toEqual([]);
     expect(supportThreadOf({ supportThread: "nope" } as unknown as BankUserProfile)).toEqual([]);
+  });
+});
+
+describe("startSpecialistHandoff", () => {
+  it("puts the client through to the desk immediately", () => {
+    const profile = startSpecialistHandoff(fixture());
+
+    expect(isWithSpecialist(profile)).toBe(true);
+    const thread = supportThreadOf(profile);
+    // The request is a real client message the desk must answer.
+    expect(thread).toHaveLength(2);
+    expect(thread[0].side).toBe("client");
+    expect(thread[0].awaitingDesk).toBe(true);
+    expect(thread[0].body).toMatch(/specialist/i);
+    // ...and Support confirms without naming a person or a bot.
+    expect(thread[1].side).toBe("support");
+    expect(thread[1].automated).toBe(true);
+    expect(thread[1].body).toMatch(/specialist/i);
+    expect(thread[1].body).not.toMatch(/\b(admin|bot|assistant|robot)\b/i);
+    expect(thread[1].body).not.toMatch(/\bAI\b/);
+
+    expect(unreadSupportCount(profile, "support")).toBe(1);
+    expect(needsSupportReply(profile)).toBe(true);
+    // The client has not opened the acknowledgement yet.
+    expect(unreadSupportCount(profile, "client")).toBe(1);
+  });
+
+  it("is idempotent, so a double click cannot spam the desk", () => {
+    const once = startSpecialistHandoff(fixture());
+    expect(startSpecialistHandoff(once)).toBe(once);
+  });
+
+  it("keeps the flag through a profile repair round-trip", () => {
+    const profile = ensureProfileShape(startSpecialistHandoff(fixture()));
+    expect(profile.supportHandoff).toBe(true);
   });
 });
