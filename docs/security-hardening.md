@@ -1,29 +1,30 @@
 # Security hardening — leaked Supabase key, RLS, split of trust
 
-Status of the **code**: done (nothing in the browser bundle reads a
-service-role key any more).
-Status of the **project**: two dashboard steps remain, they need the Supabase
-owner and cannot be performed from this repository.
+Status: **the browser no longer holds a privileged key** (done, deployed and
+verified). The leaked `service_role` JWT still works until the JWT secret is
+rotated — that one step needs the Supabase dashboard, because the Management API
+endpoint for it is not exposed to the Supabase connector.
 
 ---
 
 ## 1. What went wrong
 
-`VITE_SUPABASE_ANON_KEY` — the key every visitor's browser receives — is not an
-anon key. Decoded, its JWT payload says:
+`VITE_SUPABASE_ANON_KEY` — the key every visitor's browser received — was not an
+anon key. Decoded, its JWT payload said:
 
 ```json
 { "role": "service_role", "ref": "vbsudrwjxasfkjmbxhyo" }
 ```
 
-A `service_role` key bypasses row-level security completely: anyone who opens the
-deployed site (or the repository history, where `.env` was committed) can read
-and rewrite every profile, ledger, card and support thread in the project — and
-delete rows. `VITE_SUPABASE_SERVICE_ROLE_KEY` held the same value a second time,
-so the privileged key was inlined into the public bundle twice.
+A `service_role` key bypasses row-level security completely: anyone who opened
+the deployed site (or the repository history, where `.env` was committed) could
+read and rewrite every profile, ledger, card and support thread — and delete
+rows. `VITE_SUPABASE_SERVICE_ROLE_KEY` held the same value a second time, so the
+privileged key was inlined into the public bundle twice.
 
-`public.profiles` currently has **RLS disabled and zero policies**, which is what
-made the leak instantly exploitable instead of merely embarrassing.
+`public.profiles` still has **RLS disabled and zero policies** (7 profiles,
+~1.4 MB, plaintext passwords inside `profile_data`), which is what makes the leak
+immediately exploitable instead of merely embarrassing.
 
 ## 2. What this branch changed
 
@@ -40,26 +41,43 @@ made the leak instantly exploitable instead of merely embarrassing.
 Deleting the `VITE_SUPABASE_SERVICE_ROLE_KEY` environment variable from the
 Vercel project is part of the rollout; it is no longer referenced by any code.
 
-## 3. Step 1 — rotate the key (Supabase dashboard, ~2 minutes)
+## 3. What was done on 2026-11-15
 
-1. Supabase → project `vbsudrwjxasfkjmbxhyo` → **Settings → API**.
-2. **Roll the JWT secret** ("JWT Settings → Generate a new JWT secret"). This
-   invalidates the leaked `service_role` and `anon` JWTs at once.
-3. Copy the **publishable** key (`sb_publishable_…`) if the project offers it,
-   otherwise the regenerated **anon / public** key.
-4. Vercel → project `nbc` → **Settings → Environment Variables**:
-   - set `VITE_SUPABASE_ANON_KEY` to the new public key (Production + Preview);
-   - make sure `VITE_SUPABASE_SERVICE_ROLE_KEY` does not exist;
-   - keep the server-side secrets (`SUPABASE_SERVICE_ROLE_KEY`, `POSTGRES_*`,
-     `SUPABASE_JWT_SECRET`) — they are not `VITE_` prefixed, so Vite never
-     inlines them; they only reach server functions.
-5. Redeploy `main`.
-6. Purge `.env` from git history, e.g.
-   `git filter-repo --path .env --invert-paths` (or BFG), force-push, and tell
-   collaborators to re-clone. `.env` is already in `.gitignore`.
+| Step | Result |
+| --- | --- |
+| App switched from the `service_role` JWT to the **publishable** key `sb_publishable_VToLy…` | `VITE_SUPABASE_ANON_KEY` updated in Vercel (production + preview), local `.env` updated |
+| `VITE_SUPABASE_SERVICE_ROLE_KEY` removed from the Vercel project | build env no longer lists it |
+| Production redeployed (`dpl_CEpsYu89rNBYBEtXWu6B9GfxngGF`, commit `0ab6956`) | READY, promoted, aliased to `nbcbank.vercel.app` |
+| Bundle checked | **zero** JWT-shaped strings; the only key is `sb_publishable_…` |
+| Publishable key exercised against the API | `GET /rest/v1/profiles` → **200** |
+| Realtime enabled on `public.profiles` | in `supabase_realtime` publication, `replica identity full` |
 
-> After this step the leaked key is worthless. Do not skip it because "RLS will
-> cover it" — that key bypasses RLS by design.
+### Still open — one dashboard step
+
+Revoking the leaked key needs a JWT-secret rotation, which the Supabase
+connector does not expose (legacy keys have non-UUID ids, so `delete_api_key`
+rejects them; the auth-config tool has no `jwt_secret` field). Verified still
+live after everything above:
+
+```sql
+-- inside the project, via extensions.pg_net
+select net.http_get(
+  'https://vbsudrwjxasfkjmbxhyo.supabase.co/rest/v1/profiles?select=email&limit=2',
+  headers := jsonb_build_object('apikey', '<leaked service_role JWT>',
+                                'Authorization', 'Bearer <leaked service_role JWT>')
+);
+-- → 200 with rows: the leaked key is still accepted
+```
+
+Two clicks fix it, and they invalidate **both** legacy JWTs at once (the app no
+longer uses either, so nothing breaks):
+
+1. Supabase → project → **Settings → API → JWT Settings → Generate a new JWT
+   secret** (or, if shown, **Revoke legacy API keys**).
+2. Nothing else — `VITE_SUPABASE_ANON_KEY` is already a publishable key, so no
+   redeploy is needed.
+
+After that, re-run the snippet above: it must return `401`.
 
 ## 4. Step 2 — put profiles under RLS (requires the auth rework)
 
