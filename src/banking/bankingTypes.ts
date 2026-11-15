@@ -1,3 +1,5 @@
+import { addDaysIso, todayIso as localTodayIso } from "../lib/dates";
+
 export type PersonaId = "personal" | "business" | "wealth" | "custom";
 
 export type SupportSection = "help" | "appointment" | "branches" | "notices" | "security" | "cdic";
@@ -1001,9 +1003,9 @@ export const FX_RATES: Record<string, { name: string; buyCad: number; sellCad: n
  * Split an account's transactions into cleared (posted) and pending.
  * Pending entries are authorized/held but have not yet settled.
  */
-export function splitPostedPending(transactions: Transaction[], accountId: string) {
+export function splitPostedPending(transactions: Transaction[] | undefined | null, accountId: string) {
   let pendingNet = 0;
-  for (const tx of transactions) {
+  for (const tx of Array.isArray(transactions) ? transactions : []) {
     if (tx.accountId !== accountId) continue;
     if ((tx.status ?? "Posted") === "Pending") pendingNet += tx.amount;
   }
@@ -1013,7 +1015,7 @@ export function splitPostedPending(transactions: Transaction[], accountId: strin
 /** Current (book) balance vs available balance after holds and pending items. */
 export function balanceAvailability(
   account: BankAccount,
-  transactions: Transaction[]
+  transactions: Transaction[] | undefined | null = []
 ): { current: number; available: number; pendingNet: number; isDebt: boolean } {
   const isDebt = account.category === "credit" || account.category === "loan";
   const { pendingNet } = splitPostedPending(transactions, account.id);
@@ -1029,7 +1031,10 @@ export function balanceAvailability(
 }
 
 /** Credit still available on a card or line of credit. */
-export function availableCredit(account: BankAccount, transactions: Transaction[] = []): number {
+export function availableCredit(
+  account: BankAccount,
+  transactions: Transaction[] | undefined | null = []
+): number {
   const limit = account.limit ?? 0;
   if (!limit) return 0;
   return Math.max(0, Math.round((limit - balanceAvailability(account, transactions).available) * 100) / 100);
@@ -1056,11 +1061,12 @@ const FREQUENCY_STEP_DAYS: Record<ScheduledTransfer["frequency"], number> = {
   monthly: 30,
 };
 
-const addDays = (iso: string, days: number) => {
-  const d = new Date(`${iso}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-};
+/**
+ * Adds days to a ledger date. Delegates to the local-calendar helper so
+ * UTC+12/+13 timezones (NZ, AU) no longer shift schedules and statements back
+ * by one day.
+ */
+const addDays = (iso: string, days: number) => addDaysIso(iso, days);
 
 export type ScheduleRunResult = {
   profile: BankUserProfile;
@@ -1072,7 +1078,7 @@ export type ScheduleRunResult = {
  * Executes every scheduled transfer whose due date has arrived.
  * Repeating schedules advance to their next occurrence; one-off schedules close.
  */
-export function runDueSchedules(profile: BankUserProfile, today = new Date().toISOString().slice(0, 10)): ScheduleRunResult {
+export function runDueSchedules(profile: BankUserProfile, today = localTodayIso()): ScheduleRunResult {
   const scheduled = profile.scheduled ?? [];
   if (scheduled.length === 0) return { profile, executed: [], notifications: [] };
 
@@ -1162,7 +1168,7 @@ export function runDueSchedules(profile: BankUserProfile, today = new Date().toI
     profile: {
       ...profile,
       accounts,
-      transactions: [...newTx, ...profile.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)),
+      transactions: [...newTx, ...(profile.transactions ?? [])].sort((a, b) => (a.date < b.date ? 1 : -1)),
       scheduled: updatedSchedules,
       notifications: [...notifications, ...(profile.notifications ?? [])],
     },

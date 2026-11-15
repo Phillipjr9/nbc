@@ -23,6 +23,7 @@ import { AdminLoginPage, LoginPage, SignupPage } from "./components/AuthPages";
 import BusinessDashboard from "./components/BusinessDashboard";
 import Chatbot from "./components/Chatbot";
 import Dashboard from "./components/Dashboard";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Footer from "./components/Footer";
 import Header from "./components/Header";
 import ProductPages from "./components/ProductPages";
@@ -30,6 +31,7 @@ import SearchDialog from "./components/SearchDialog";
 import { AdviceSection, HelpSection, Hero, PromoSection, ServicesSection } from "./components/Sections";
 import SupportPages from "./components/SupportPages";
 import { fetchProfiles, upsertProfile } from "./lib/profileSync";
+import { ensureProfileShape, isPersistableProfile } from "./lib/profileNormalize";
 import { isSupabaseConfigured } from "./lib/supabase";
 
 const STORAGE_PROFILES_KEY = "nbc_profiles_v1";
@@ -90,16 +92,45 @@ const normalizeCredentialString = (value: string | undefined | null): string =>
     .replace(/[\u00A0\u200B-\u200D\uFEFF]/g, "")
     .trim();
 
+/**
+ * Chooses the ledger to keep when a device merges the server copy with its own.
+ *
+ * `profiles.profile_data` is a single JSON blob, so the last writer wins. When a
+ * row comes back with an empty (or missing) `transactions` array — a partial
+ * write, a placeholder session, a row created outside the app — blindly
+ * accepting it wipes the history on every other device, which is exactly the
+ * "my transactions vanished on this phone" report. Keep the populated ledger in
+ * that one case and warn, so the real fix (repair the row) is visible.
+ */
+const preferTransactionHistory = (
+  remote: BankUserProfile["transactions"] | undefined,
+  local: BankUserProfile["transactions"] | undefined
+): BankUserProfile["transactions"] => {
+  const remoteList = Array.isArray(remote) ? remote : [];
+  const localList = Array.isArray(local) ? local : [];
+  if (remoteList.length === 0 && localList.length > 0) {
+    console.warn(
+      "[profiles] Server copy has no transactions but this device has",
+      localList.length,
+      "— keeping local history. The stored row may be incomplete."
+    );
+    return localList;
+  }
+  return remoteList.length > 0 ? remoteList : localList;
+};
+
 const sanitizeCustomProfiles = (profiles: BankUserProfile[] = []): BankUserProfile[] =>
-  profiles
+  (Array.isArray(profiles) ? profiles : [])
     .filter((profile) => Boolean(normalizeCredentialString(profile?.email)))
-    .map((profile) => ({
-      ...profile,
-      email: normalizeCredentialString(profile.email),
-      password: normalizeCredentialString(profile.password),
-      pin: normalizeCredentialString(profile.pin),
-      cards: normalizeBankCardList(profile.cards),
-    }));
+    .map((profile) =>
+      ensureProfileShape({
+        ...profile,
+        email: normalizeCredentialString(profile.email),
+        password: normalizeCredentialString(profile.password),
+        pin: normalizeCredentialString(profile.pin),
+        cards: normalizeBankCardList(profile.cards),
+      })
+    );
 
 /** Merge remote profiles into the built-in profiles Record (personal/business/wealth).
  * Built-in profiles are identified by their `id` matching the key ("personal", "business", "wealth").
@@ -147,8 +178,8 @@ const mergeRemoteProfilesIntoBuiltIn = (
         payees: rp.payees ?? current.payees,
         recipients: rp.recipients ?? current.recipients,
         cards: rp.cards ? normalizeBankCardList(rp.cards) : current.cards,
-        transactions: rp.transactions ?? current.transactions,
-        accounts: rp.accounts ?? current.accounts,
+        transactions: preferTransactionHistory(rp.transactions, current.transactions),
+        accounts: rp.accounts && rp.accounts.length > 0 ? rp.accounts : current.accounts,
       };
     }
   }
@@ -190,8 +221,8 @@ const mergeRemoteProfiles = (existing: BankUserProfile[], remote: BankUserProfil
         payees: profile.payees ?? local.payees,
         recipients: profile.recipients ?? local.recipients,
         cards: profile.cards ? normalizeBankCardList(profile.cards) : local.cards,
-        transactions: profile.transactions ?? local.transactions,
-        accounts: profile.accounts ?? local.accounts,
+        transactions: preferTransactionHistory(profile.transactions, local.transactions),
+        accounts: profile.accounts && profile.accounts.length > 0 ? profile.accounts : local.accounts,
       };
     } else {
       merged.push({
@@ -215,9 +246,9 @@ export default function App() {
   const [profiles, setProfiles] = useState<Record<"personal" | "business" | "wealth", BankUserProfile>>(() => {
     const stored = loadStored<Record<"personal" | "business" | "wealth", BankUserProfile>>(STORAGE_PROFILES_KEY, INITIAL_PROFILES);
     return {
-      personal: { ...INITIAL_PROFILES.personal, ...stored.personal, cards: normalizeBankCardList(stored.personal?.cards) },
-      business: { ...INITIAL_PROFILES.business, ...stored.business, cards: normalizeBankCardList(stored.business?.cards) },
-      wealth: { ...INITIAL_PROFILES.wealth, ...stored.wealth, cards: normalizeBankCardList(stored.wealth?.cards) },
+      personal: ensureProfileShape({ ...INITIAL_PROFILES.personal, ...stored.personal, cards: normalizeBankCardList(stored.personal?.cards) }),
+      business: ensureProfileShape({ ...INITIAL_PROFILES.business, ...stored.business, cards: normalizeBankCardList(stored.business?.cards) }),
+      wealth: ensureProfileShape({ ...INITIAL_PROFILES.wealth, ...stored.wealth, cards: normalizeBankCardList(stored.wealth?.cards) }),
     };
   });
   const [customProfiles, setCustomProfiles] = useState<BankUserProfile[]>(() => {
@@ -431,6 +462,13 @@ export default function App() {
 
   useEffect(() => {
     if (!activeProfile) return;
+    // A profile that has not finished loading from the server (or a placeholder
+    // session) must never be written back: `profile_data` is a full-document
+    // write, so an empty object here destroys that client's ledger everywhere.
+    if (!isPersistableProfile(activeProfile)) {
+      console.info("[profiles] Skipping write-back of an incomplete profile for", activeProfile.email);
+      return;
+    }
 
     let isMounted = true;
 
@@ -480,21 +518,22 @@ export default function App() {
     logDetail?: string,
     severity: AuditLogEntry["severity"] = "info"
   ) => {
-    const normalizeProfile = (profile: BankUserProfile): BankUserProfile => ({
-      ...profile,
-      cards: normalizeBankCardList(
-        Array.isArray(profile.cards)
-          ? profile.cards.filter((card, index, list) => list.findIndex((entry) => entry.id === card.id) === index)
-          : []
-      ),
-    });
+    const normalizeProfile = (profile: BankUserProfile): BankUserProfile =>
+      ensureProfileShape({
+        ...profile,
+        cards: normalizeBankCardList(
+          Array.isArray(profile.cards)
+            ? profile.cards.filter((card, index, list) => list.findIndex((entry) => entry.id === card.id) === index)
+            : []
+        ),
+      });
 
     if (key === "personal" || key === "business" || key === "wealth") {
       setProfiles((prev) => {
         const next = normalizeProfile(updater(prev[key]));
         // Persist to Supabase so remote sync cannot overwrite admin changes.
         // Fire-and-forget: the 15s sync loop will retry if this write fails.
-        if (isSupabaseConfigured) {
+        if (isSupabaseConfigured && isPersistableProfile(next)) {
           upsertProfile(next).catch((err) => console.warn("Supabase profile upsert failed:", err));
         }
         return { ...prev, [key]: next };
@@ -506,7 +545,7 @@ export default function App() {
         );
         // Persist to Supabase so remote sync cannot overwrite admin changes.
         const updated = next.find((cp) => cp.email.toLowerCase() === key.toLowerCase());
-        if (isSupabaseConfigured && updated) {
+        if (isSupabaseConfigured && updated && isPersistableProfile(updated)) {
           upsertProfile(updated).catch((err) => console.warn("Supabase profile upsert failed:", err));
         }
         return next;
@@ -570,11 +609,19 @@ export default function App() {
       minute: "2-digit",
       hour12: true,
     });
-    const ready = processSchedules(profile.email, { ...profile, lastLogin: stamp });
-    setCustomProfiles((prev) =>
-      prev.map((c) => (c.email.toLowerCase() === profile.email.toLowerCase() ? ready : c))
-    );
-    setActiveProfileKey(profile.email);
+    const ready = ensureProfileShape({ ...profile, lastLogin: stamp });
+    // Upsert by email instead of only replacing an existing entry: on a fresh
+    // device the profile was just fetched from Supabase, and the old
+    // `prev.map(...)` silently dropped it, leaving the user on the login page
+    // with an apparently empty history.
+    setCustomProfiles((prev) => {
+      const index = prev.findIndex((c) => c.email.toLowerCase() === ready.email.toLowerCase());
+      if (index < 0) return [ready, ...prev];
+      const next = [...prev];
+      next[index] = ready;
+      return next;
+    });
+    setActiveProfileKey(ready.email);
     openDashboardForProfile(ready);
   };
 
@@ -858,22 +905,26 @@ export default function App() {
           onSignOut={handleAdminSignOut}
         />
       ) : isDedicatedPersonalDashboard && personalPageProfile ? (
-        <Dashboard
-          profile={personalPageProfile}
-          onUpdateProfile={handleUpdateActiveProfile}
-          onGoPublicSite={() => navigate({ kind: "home" })}
-          onGoHelp={() => navigate({ kind: "support", section: "appointment" })}
-          onSignOut={handleCustomerSignOut}
-        />
+        <ErrorBoundary label="personal dashboard" onReset={() => setRoute({ kind: "personal-dashboard" })}>
+          <Dashboard
+            profile={personalPageProfile}
+            onUpdateProfile={handleUpdateActiveProfile}
+            onGoPublicSite={() => navigate({ kind: "home" })}
+            onGoHelp={() => navigate({ kind: "support", section: "appointment" })}
+            onSignOut={handleCustomerSignOut}
+          />
+        </ErrorBoundary>
       ) : isDedicatedBusinessDashboard && businessPageProfile ? (
-        <BusinessDashboard
-          profile={businessPageProfile}
-          initialTab={businessInitialTab}
-          onUpdateProfile={handleUpdateActiveProfile}
-          onGoPublicSite={() => navigate({ kind: "home" })}
-          onGoHelp={() => navigate({ kind: "support", section: "appointment" })}
-          onSignOut={handleCustomerSignOut}
-        />
+        <ErrorBoundary label="business dashboard" onReset={() => setRoute({ kind: "business-dashboard", tab: "cards" })}>
+          <BusinessDashboard
+            profile={businessPageProfile}
+            initialTab={businessInitialTab}
+            onUpdateProfile={handleUpdateActiveProfile}
+            onGoPublicSite={() => navigate({ kind: "home" })}
+            onGoHelp={() => navigate({ kind: "support", section: "appointment" })}
+            onSignOut={handleCustomerSignOut}
+          />
+        </ErrorBoundary>
       ) : (
         <>
           <Header

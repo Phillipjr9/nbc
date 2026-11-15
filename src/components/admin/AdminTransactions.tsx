@@ -20,12 +20,9 @@ import {
 } from "../../banking/adminOps";
 import { Transaction, TRANSFER_FAILURE_REASONS, REVERSAL_REASONS, formatMoney } from "../../banking/bankingTypes";
 import { Field, inputCls } from "./AdminClients";
+import { addDaysIso } from "../../lib/dates";
 
-const subtractDays = (days: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
-};
+const subtractDays = (days: number) => addDaysIso(todayIso(), -days);
 
 export default function AdminTransactions({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
   const entry = ops.users.find((u) => u.key === selectedKey) ?? ops.users[0];
@@ -76,10 +73,10 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
     const out: { userKey: string; userName: string; accountName: string; currency: "CAD" | "USD"; tx: Transaction }[] = [];
     for (const u of ops.users) {
       if (filterUser !== "all" && u.key !== filterUser) continue;
-      for (const tx of u.profile.transactions) {
+      for (const tx of u.profile.transactions ?? []) {
         if (filterStatus !== "all" && (tx.status ?? "Posted") !== filterStatus) continue;
-        if (fromDate && tx.date < fromDate) continue;
-        if (toDate && tx.date > toDate) continue;
+        if (fromDate && (tx.date ?? "") < fromDate) continue;
+        if (toDate && (tx.date ?? "") > toDate) continue;
         if (filterText.trim()) {
           const q = filterText.toLowerCase();
           if (

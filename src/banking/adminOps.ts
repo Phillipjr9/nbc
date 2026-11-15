@@ -9,6 +9,7 @@ import {
   SavingsGoal,
   Transaction,
 } from "../banking/bankingTypes";
+import { parseIsoDate, toIsoDate, todayIso as localTodayIso } from "../lib/dates";
 
 export type ManagedUserEntry = {
   key: string;
@@ -441,7 +442,13 @@ export const generateCardNumber = (accent: BankCard["accent"]): string => {
 
 export const round2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 export const newId = (prefix: string) => `${prefix}-${Date.now()}-${Math.floor(Math.random() * 9000 + 1000)}`;
-export const todayIso = () => new Date().toISOString().slice(0, 10);
+/**
+ * Today's ledger date in the user's own timezone.
+ * `toISOString()` returns the UTC day, which is a day behind for every country
+ * east of UTC between local midnight and its UTC offset — that is why the same
+ * entry looked dated differently depending on where it was posted from.
+ */
+export const todayIso = () => localTodayIso();
 export const nowStamp = () =>
   new Date().toLocaleString("en-CA", {
     year: "numeric",
@@ -462,8 +469,7 @@ export const lostStamp = () =>
     hour12: true,
   });
 
-export const pinStamp = () =>
-  new Date().toISOString().slice(0, 10);
+export const pinStamp = () => localTodayIso();
 
 export const randomDigits = (count: number) =>
   Array.from({ length: count }, () => Math.floor(Math.random() * 10)).join("");
@@ -693,7 +699,7 @@ export function applyAdminTransaction(
   return {
     ...profile,
     accounts,
-    transactions: [tx, ...profile.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)),
+    transactions: [tx, ...(profile.transactions ?? [])].sort((a, b) => (a.date < b.date ? 1 : -1)),
   };
 }
 
@@ -702,7 +708,7 @@ export function closeAccount(profile: BankUserProfile, accountId: string): BankU
     ...profile,
     accounts: profile.accounts.filter((a) => a.id !== accountId),
     cards: profile.cards.filter((c) => c.linkedAccountId !== accountId),
-    transactions: profile.transactions.filter((t) => t.accountId !== accountId),
+    transactions: (profile.transactions ?? []).filter((t) => t.accountId !== accountId),
     goals: profile.goals.filter((g) => g.linkedAccountId !== accountId),
   };
 }
@@ -727,7 +733,7 @@ export function statementCsv(profile: BankUserProfile, accountId = "all") {
     [],
     ["Date", "Account", "Description", "Category", "Debit", "Credit", "Status", "Reference", "Entered by"],
   ];
-  const txs = profile.transactions.filter((t) => accountId === "all" || t.accountId === accountId);
+  const txs = (profile.transactions ?? []).filter((t) => accountId === "all" || t.accountId === accountId);
   for (const tx of txs) {
     const acc = profile.accounts.find((a) => a.id === tx.accountId);
     rows.push([
@@ -884,8 +890,8 @@ export const MAX_GENERATED_ENTRIES = 600;
  * Amounts are drawn from [minAmount, maxAmount] and alternate sensibly for "mixed".
  */
 export function generateTransactionSeries(input: GeneratorInput, seed = 1): GeneratedEntry[] {
-  const start = new Date(`${input.fromDate}T12:00:00`);
-  const end = new Date(`${input.toDate}T12:00:00`);
+  const start = parseIsoDate(input.fromDate);
+  const end = parseIsoDate(input.toDate);
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
 
   const step = FREQUENCY_DAYS[input.frequency];
@@ -909,9 +915,9 @@ export function generateTransactionSeries(input: GeneratorInput, seed = 1): Gene
     else signed = index % 2 === 0 ? magnitude : -magnitude;
 
     entries.push({
-      id: `gen-${cursor.toISOString().slice(0, 10)}-${index}`,
+      id: `gen-${toIsoDate(cursor)}-${index}`,
       accountId: input.accountId,
-      date: cursor.toISOString().slice(0, 10),
+      date: toIsoDate(cursor),
       description: input.description.trim() || "Administration historical entry",
       category: input.category,
       amount: signed,
@@ -950,7 +956,7 @@ export function applyGeneratedSeries(
   return {
     ...profile,
     accounts,
-    transactions: [...stamped, ...profile.transactions].sort((a, b) => (a.date < b.date ? 1 : -1)),
+    transactions: [...stamped, ...(profile.transactions ?? [])].sort((a, b) => (a.date < b.date ? 1 : -1)),
   };
 }
 

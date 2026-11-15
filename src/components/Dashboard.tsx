@@ -19,6 +19,8 @@ import {
 import BankCardVisual from "./BankCardVisual";
 import { BankCard } from "../banking/bankingTypes";
 import { randomDigits } from "../banking/adminOps";
+import { toIsoDate, todayIso as localTodayIso } from "../lib/dates";
+import { sortTransactionsDesc } from "../lib/profileNormalize";
 import { ArrowRight, HelpIcon, LockIcon, SearchIcon } from "./icons";
 import TransactionSendOverlay, {
   AnimatedTxPayload,
@@ -54,8 +56,8 @@ export default function Dashboard({
     updateProfile((prev) => {
       const next = updater(prev);
       if (next === prev || next.transactions === prev.transactions) return next;
-      const existing = new Set(prev.transactions.map((t) => t.id));
-      const fresh = next.transactions.filter((t) => !existing.has(t.id));
+      const existing = new Set((prev.transactions ?? []).map((t) => t.id));
+      const fresh = (next.transactions ?? []).filter((t) => !existing.has(t.id));
       if (fresh.length === 0) return next;
       const alerts = transactionNotifications(next, fresh);
       if (alerts.length === 0) return next;
@@ -165,7 +167,13 @@ export default function Dashboard({
     }, 4200);
   };
 
-  const todayIso = () => new Date().toISOString().slice(0, 10);
+  /**
+   * "Today" for the ledger must be the local calendar day. `toISOString()`
+   * returns the UTC day, so users in Lagos / Auckland / Sydney (and anyone in
+   * the Americas after 19:00) got yesterday's or tomorrow's date stamped onto
+   * new entries, which then fell outside date-filtered views.
+   */
+  const todayIso = () => localTodayIso();
   const makeReference = (prefix = "NB") =>
     `${prefix}-${Math.floor(100000 + Math.random() * 900000)}`;
   const nowStamp = () =>
@@ -211,7 +219,7 @@ export default function Dashboard({
 
   const rangeBounds = useMemo(() => {
     const today = new Date();
-    const iso = (d: Date) => d.toISOString().slice(0, 10);
+    const iso = (d: Date) => toIsoDate(d);
     if (txRange === "all") return { from: "", to: "" };
     if (txRange === "custom") return { from: txFrom, to: txTo };
     if (txRange === "ytd") return { from: `${today.getFullYear()}-01-01`, to: "" };
@@ -221,16 +229,26 @@ export default function Dashboard({
     return { from: iso(start), to: "" };
   }, [txRange, txFrom, txTo]);
 
+  /** Newest first — remote payloads are not guaranteed to be ordered. */
+  const sortedTransactions = useMemo(
+    () => sortTransactionsDesc(profile.transactions),
+    [profile.transactions]
+  );
+
   const filteredTransactions = useMemo(() => {
-    return profile.transactions.filter((tx) => {
+    return sortedTransactions.filter((tx) => {
       if (selectedAccountId !== "all" && tx.accountId !== selectedAccountId) return false;
       if (txCat !== "All" && tx.category !== txCat) return false;
       if (rangeBounds.from && tx.date < rangeBounds.from) return false;
       if (rangeBounds.to && tx.date > rangeBounds.to) return false;
-      if (txQuery.trim() && !tx.description.toLowerCase().includes(txQuery.trim().toLowerCase())) return false;
+      if (txQuery.trim()) {
+        const needle = txQuery.trim().toLowerCase();
+        const haystack = `${tx.description ?? ""} ${tx.category ?? ""} ${tx.reference ?? ""}`.toLowerCase();
+        if (!haystack.includes(needle)) return false;
+      }
       return true;
     });
-  }, [profile.transactions, selectedAccountId, txCat, txQuery, rangeBounds]);
+  }, [sortedTransactions, selectedAccountId, txCat, txQuery, rangeBounds]);
 
   /** Net movement for the currently filtered set — used for the insights strip. */
   const filteredTotals = useMemo(() => {
@@ -276,8 +294,8 @@ export default function Dashboard({
     // Enforce the monthly spend limit on any card linked to the destination credit account.
     const destCard = profile.cards.find((c) => c.linkedAccountId === dst.id);
     if (destCard?.monthlyLimit) {
-      const month = new Date().toISOString().slice(0, 7);
-      const spentThisMonth = profile.transactions
+      const month = localTodayIso().slice(0, 7);
+      const spentThisMonth = sortedTransactions
         .filter((t) => t.accountId === dst.id && t.date.startsWith(month) && t.amount > 0)
         .reduce((sum, t) => sum + t.amount, 0);
       if (spentThisMonth + amt > destCard.monthlyLimit) {
@@ -1400,7 +1418,7 @@ export default function Dashboard({
                   </div>
                   {/* Compact Mobile Transaction List (fits 100% width — no horizontal scroll) */}
                   <ul className="divide-y divide-[#f1f1f1] sm:hidden">
-                    {profile.transactions.slice(0, 6).map((tx) => {
+                    {sortedTransactions.slice(0, 6).map((tx) => {
                       const acc = profile.accounts.find((a) => a.id === tx.accountId);
                       const isNew = recentTxIds.includes(tx.id);
                       return (
@@ -1454,7 +1472,7 @@ export default function Dashboard({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#f1f1f1]">
-                        {profile.transactions.slice(0, 6).map((tx) => {
+                        {sortedTransactions.slice(0, 6).map((tx) => {
                           const acc = profile.accounts.find((a) => a.id === tx.accountId);
                           const isNew = recentTxIds.includes(tx.id);
                           return (
@@ -1613,7 +1631,7 @@ export default function Dashboard({
                 onChange={(e) => setSelectedAccountId(e.target.value)}
                 className="rounded-[6px] border border-[#c9c3b6] bg-white px-3.5 py-2 text-[14px] font-medium text-nbc-navy"
               >
-                <option value="all">All accounts ({profile.transactions.length})</option>
+                <option value="all">All accounts ({sortedTransactions.length})</option>
                 {profile.accounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name} — {formatMoney(a.balance, a.currency)}
@@ -2854,8 +2872,8 @@ export default function Dashboard({
 
                     {card.monthlyLimit ? (
                       (() => {
-                        const month = new Date().toISOString().slice(0, 7);
-                        const spent = profile.transactions
+                        const month = localTodayIso().slice(0, 7);
+                        const spent = sortedTransactions
                           .filter((t) => t.accountId === card.linkedAccountId && t.date.startsWith(month) && t.amount > 0)
                           .reduce((sum, t) => sum + t.amount, 0);
                         const pct = Math.min(100, Math.round((spent / card.monthlyLimit!) * 100));
@@ -2911,7 +2929,7 @@ export default function Dashboard({
 
                     {/* Recent activity on this card */}
                     {(() => {
-                      const cardTxs = profile.transactions
+                      const cardTxs = sortedTransactions
                         .filter((t) => t.accountId === card.linkedAccountId)
                         .slice(0, 5);
                       if (cardTxs.length === 0) return null;
