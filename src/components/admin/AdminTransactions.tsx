@@ -76,7 +76,8 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
     const out: { userKey: string; userName: string; accountName: string; currency: "CAD" | "USD"; tx: Transaction }[] = [];
     for (const u of ops.users) {
       if (filterUser !== "all" && u.key !== filterUser) continue;
-      for (const tx of u.profile.transactions) {
+      const txs = Array.isArray(u.profile.transactions) ? u.profile.transactions : [];
+      for (const tx of txs) {
         if (filterStatus !== "all" && (tx.status ?? "Posted") !== filterStatus) continue;
         if (fromDate && tx.date < fromDate) continue;
         if (toDate && tx.date > toDate) continue;
