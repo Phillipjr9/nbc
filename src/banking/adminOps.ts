@@ -101,9 +101,16 @@ export function authenticateAdmin(email: string, password: string): AdminAuthRes
   };
 }
 
+<<<<<<< HEAD
 export function can(_identity: AdminIdentity | null, _permission: AdminPermission): boolean {
   // Single super-administrator role — all permissions granted.
   return true;
+=======
+export function can(identity: AdminIdentity | null, permission: AdminPermission): boolean {
+  if (!identity) return false;
+  const allowed = ROLE_PERMISSIONS[identity.role];
+  return allowed === "*" || allowed.includes(permission);
+>>>>>>> origin/arena/4558a41e-nbc
 }
 
 /* ------------------------------------------------------------------ *
