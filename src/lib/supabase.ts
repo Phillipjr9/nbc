@@ -13,10 +13,15 @@ const supabaseAnonKey =
   env.SUPABASE_ANON_KEY ??
   undefined;
 
+const supabaseServiceRoleKey =
+  env.SUPABASE_SERVICE_ROLE_KEY ??
+  undefined;
+
 export const isSupabaseConfigured = Boolean(
   supabaseUrl && supabaseAnonKey && supabaseUrl.startsWith("http")
 );
 
+// Anon client — used for reads and user-facing auth (subject to RLS)
 export const supabase = createClient(
   supabaseUrl ?? "https://placeholder.supabase.co",
   supabaseAnonKey ?? "placeholder-anon-key",
@@ -28,5 +33,10 @@ export const supabase = createClient(
     },
   }
 );
+
+// Service-role client — bypasses RLS; used only for admin writes (upsertProfile, etc.)
+export const supabaseAdmin = supabaseUrl && supabaseServiceRoleKey
+  ? createClient(supabaseUrl, supabaseServiceRoleKey)
+  : supabase;
 
 export type { Session, User };

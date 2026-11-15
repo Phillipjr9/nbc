@@ -1,5 +1,5 @@
 import type { BankUserProfile } from "../banking/bankingTypes";
-import { isSupabaseConfigured, supabase } from "./supabase";
+import { isSupabaseConfigured, supabase, supabaseAdmin } from "./supabase";
 
 type SupabaseProfileRow = {
   email: string;
@@ -68,7 +68,8 @@ export async function upsertProfile(profile: BankUserProfile) {
     updated_at: new Date().toISOString(),
   };
 
-  const { data, error } = await supabase
+  // Use service-role client so RLS does not block admin writes
+  const { data, error } = await supabaseAdmin
     .from("profiles")
     .upsert(payload, { onConflict: "email" })
     .select()
