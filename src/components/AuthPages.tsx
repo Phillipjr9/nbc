@@ -216,7 +216,10 @@ export function LoginPage({
       return;
     }
 
-    // If Supabase is configured and we get here, it means auth failed
+    // If Supabase is configured and we get here, it means auth failed, but
+    // local/custom profile records are still valid authentication sources for
+    // data-backed staff/client accounts that have not been created as Supabase
+    // Auth users yet.
     if (isSupabaseConfigured) {
       setError("Invalid email or password. Please try again.");
       return;
