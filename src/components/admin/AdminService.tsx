@@ -275,6 +275,7 @@ export function AdminCards({ ops, selectedKey, onSelectKey }: AdminPanelProps) {
                 </div>
               )}
               <div className="mt-3 space-y-1.5 text-[11.5px] text-[#565656]">
+                <p><strong className="text-[#121212]">Cardholder name:</strong> {card.cardholderName || "—"}</p>
                 <p><strong className="text-[#121212]">Card number:</strong> {card.number ? card.number.replace(/(.{4})/g, "$1 ").trim() : `•••• •••• •••• ${card.last4}`}</p>
                 <p><strong className="text-[#121212]">Expiry:</strong> {card.expiry}</p>
                 <p><strong className="text-[#121212]">CVV:</strong> {card.cvv ?? "—"}</p>
