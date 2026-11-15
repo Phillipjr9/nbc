@@ -18,6 +18,11 @@ import {
   FX_RATES,
   TRANSFER_FAILURE_REASONS,
 } from "../banking/bankingTypes";
+import {
+  BUSINESS_PAGE_TO_ROUTE_TAB,
+  BusinessPageTab,
+  BusinessRouteTab,
+} from "../banking/routeMapper";
 import { formatIsoDate, todayIso as localTodayIso } from "../lib/dates";
 import { sortTransactionsDesc } from "../lib/profileNormalize";
 import { randomDigits, round2 } from "../banking/adminOps";
@@ -28,11 +33,17 @@ import TransactionSendOverlay, {
   AnimatedTxPhase,
 } from "./TransactionSendOverlay";
 
-type BizTab = "treasury" | "payroll" | "invoices" | "wires" | "cards" | "ledger" | "account" | "settings";
+/** Pages of this dashboard; `account` is a drill-down inside Cash position. */
+type BizTab = BusinessPageTab;
+
+/** The pages of this dashboard that have their own address (see routeMapper). */
+type RoutedBizTab = BusinessRouteTab;
 
 type Props = {
   profile: BankUserProfile;
   initialTab?: BizTab;
+  /** Keeps the address bar (and therefore a refresh) in step with the tab. */
+  onSelectTab?: (tab: RoutedBizTab) => void;
   onUpdateProfile: (updater: (prev: BankUserProfile) => BankUserProfile) => void;
   onGoPublicSite: () => void;
   onGoHelp: () => void;
@@ -70,12 +81,32 @@ const EXTERNAL_TRANSFER_COUNTRIES = [
 export default function BusinessDashboard({
   profile,
   initialTab = "treasury",
+  onSelectTab,
   onUpdateProfile,
   onGoPublicSite,
   onGoHelp,
   onSignOut,
 }: Props) {
-  const [tab, setTab] = useState<BizTab>(initialTab);
+  const [tab, setTabState] = useState<BizTab>(initialTab);
+
+  /**
+   * Every tab switch updates the address (`#/dashboard/business?tab=ledger`).
+   *
+   * This is what made a refresh feel like a redirect: the URL kept whatever tab
+   * the dashboard opened with — `tab=cards`, the tab the business dashboard is
+   * entered on — while the client browsed elsewhere, so refreshing "moved" them
+   * back to Cards. Now the address follows the tab you are actually on.
+   */
+  const setTab = (next: BizTab) => {
+    setTabState(next);
+    const routed = BUSINESS_PAGE_TO_ROUTE_TAB[next];
+    if (routed) onSelectTab?.(routed);
+  };
+
+  /** Follows the address when it changes from outside (back/forward, a link). */
+  useEffect(() => {
+    setTabState(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "smooth" });

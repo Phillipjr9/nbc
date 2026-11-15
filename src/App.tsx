@@ -16,7 +16,11 @@ import {
   applyCardApprovalDecision,
   CardApprovalPayload,
 } from "./banking/adminOps";
-import { hashToRoute, routeToHash } from "./banking/routeMapper";
+import {
+  businessPageTabForRoute,
+  hashToRoute,
+  routeToHash,
+} from "./banking/routeMapper";
 import { runDueSchedules } from "./banking/bankingTypes";
 import AdminDashboard from "./components/AdminDashboard";
 import { AdminLoginPage, LoginPage, SignupPage } from "./components/AuthPages";
@@ -694,10 +698,13 @@ export default function App() {
 
   const activeDashboardRoute: PageRoute = useMemo(() => {
     if (activeProfile && isBusinessProfile(activeProfile)) {
-      return { kind: "business-dashboard", tab: "cards" };
+      // Whatever tab the address is on, so a "Dashboard" link does not drag the
+      // client back to Corporate cards.
+      const tab = route.kind === "business-dashboard" ? route.tab : undefined;
+      return { kind: "business-dashboard", tab: tab ?? "cash-position" };
     }
     return { kind: "personal-dashboard" };
-  }, [activeProfile]);
+  }, [activeProfile, route]);
 
   const allManagedUsers: ManagedUserEntry[] = useMemo(() => {
     const builtIns: ManagedUserEntry[] = [
@@ -863,7 +870,9 @@ export default function App() {
   const openDashboardForProfile = (profile: BankUserProfile) => {
     navigate(
       isBusinessProfile(profile)
-        ? { kind: "business-dashboard", tab: "cards" }
+        ? // Land on Cash position rather than Corporate cards: the address now
+          // records the tab, so whichever tab is shown has to be the real one.
+          { kind: "business-dashboard", tab: "cash-position" }
         : { kind: "personal-dashboard" }
     );
   };
@@ -1132,22 +1141,9 @@ export default function App() {
   const isDedicatedAdminDashboard = route.kind === "admin" && adminAuth && Boolean(adminIdentity);
   const isDedicatedPersonalDashboard = route.kind === "personal-dashboard" && Boolean(personalPageProfile);
   const isDedicatedBusinessDashboard = route.kind === "business-dashboard" && Boolean(businessPageProfile);
-  const businessInitialTab: "treasury" | "payroll" | "invoices" | "wires" | "cards" | "ledger" | "settings" =
-    route.kind === "business-dashboard"
-      ? route.tab === "payroll"
-        ? "payroll"
-        : route.tab === "invoices"
-          ? "invoices"
-          : route.tab === "wires"
-            ? "wires"
-            : route.tab === "cards"
-              ? "cards"
-              : route.tab === "ledger"
-                ? "ledger"
-                : route.tab === "settings"
-                  ? "settings"
-                  : "treasury"
-      : "treasury";
+  const businessInitialTab = businessPageTabForRoute(
+    route.kind === "business-dashboard" ? route.tab : undefined
+  );
   const isAuthRoute =
     route.kind === "login" || route.kind === "admin-login" || route.kind === "signup";
 
@@ -1219,10 +1215,17 @@ export default function App() {
           />
         </ErrorBoundary>
       ) : isDedicatedBusinessDashboard && businessPageProfile ? (
-        <ErrorBoundary label="business dashboard" onReset={() => setRoute({ kind: "business-dashboard", tab: "cards" })}>
+        <ErrorBoundary
+          label="business dashboard"
+          onReset={() => navigate({ kind: "business-dashboard", tab: "cash-position" })}
+        >
           <BusinessDashboard
             profile={businessPageProfile}
             initialTab={businessInitialTab}
+            onSelectTab={(tab) => {
+              if (route.kind === "business-dashboard" && route.tab === tab) return;
+              navigate({ kind: "business-dashboard", tab });
+            }}
             onUpdateProfile={handleUpdateActiveProfile}
             onGoPublicSite={() => navigate({ kind: "home" })}
             onGoHelp={() => navigate({ kind: "support", section: "appointment" })}

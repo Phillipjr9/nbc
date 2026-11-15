@@ -1,5 +1,51 @@
 import { PageRoute } from "./bankingTypes";
 
+/** The business-dashboard addresses that exist in the URL. */
+export type BusinessRouteTab = NonNullable<Extract<PageRoute, { kind: "business-dashboard" }>["tab"]>;
+
+/** Every page of the business dashboard, in the dashboard's own vocabulary. */
+export type BusinessPageTab =
+  | "treasury"
+  | "payroll"
+  | "invoices"
+  | "wires"
+  | "cards"
+  | "ledger"
+  | "account"
+  | "settings";
+
+/**
+ * Dashboard tab → address tab.
+ *
+ * `account` is a drill-down inside Cash position rather than a page of its own,
+ * so it deliberately has no entry: opening it keeps the current address instead
+ * of writing a tab a refresh could not come back to.
+ */
+export const BUSINESS_PAGE_TO_ROUTE_TAB: Partial<Record<BusinessPageTab, BusinessRouteTab>> = {
+  treasury: "cash-position",
+  payroll: "payroll",
+  invoices: "invoices",
+  wires: "wires",
+  cards: "cards",
+  ledger: "ledger",
+  settings: "settings",
+};
+
+const BUSINESS_ROUTE_TAB_TO_PAGE: Record<BusinessRouteTab, BusinessPageTab> = {
+  "cash-position": "treasury",
+  payroll: "payroll",
+  invoices: "invoices",
+  wires: "wires",
+  cards: "cards",
+  ledger: "ledger",
+  settings: "settings",
+};
+
+/** Address tab → dashboard tab, used when the URL drives the dashboard. */
+export function businessPageTabForRoute(tab: BusinessRouteTab | undefined): BusinessPageTab {
+  return BUSINESS_ROUTE_TAB_TO_PAGE[tab ?? "cash-position"] ?? "treasury";
+}
+
 export function routeToHash(route: PageRoute): string {
   switch (route.kind) {
     case "home":
