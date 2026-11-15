@@ -14,11 +14,19 @@ type SupabaseProfileRow = {
   profile_data?: Partial<BankUserProfile> | null;
 };
 
-function normaliseProfileRow(row: SupabaseProfileRow): BankUserProfile | null {
-  if (!row?.email) return null;
+/**
+ * Turns one `profiles` row into a usable profile.
+ *
+ * Exported because Realtime hands us rows: applying the row that arrived is
+ * what keeps a Support reply instant, and it avoids re-downloading the whole
+ * table for every message.
+ */
+export function profileFromRow(row: SupabaseProfileRow | Record<string, unknown> | null | undefined): BankUserProfile | null {
+  const source = (row ?? null) as SupabaseProfileRow | null;
+  if (!source?.email) return null;
 
-  const payload = row.profile_data ?? {};
-  const safeFullName = row.full_name ?? payload.fullName ?? "";
+  const payload = (source.profile_data ?? {}) as Partial<BankUserProfile>;
+  const safeFullName = source.full_name ?? payload.fullName ?? "";
 
   // `profile_data` is a JSON blob written by whichever client saved last, so it
   // can be partial (older release, a write that dropped undefined keys, a row
@@ -26,14 +34,14 @@ function normaliseProfileRow(row: SupabaseProfileRow): BankUserProfile | null {
   // otherwise a missing `transactions` array empties the ledger or crashes it.
   return ensureProfileShape({
     ...(payload as BankUserProfile),
-    email: row.email,
+    email: source.email,
     fullName: safeFullName || payload.fullName || "",
-    roleLabel: row.role_label ?? payload.roleLabel ?? "Personal Banking",
-    accountKind: row.account_kind ?? payload.accountKind ?? payload.id ?? "personal",
-    status: row.status ?? payload.status ?? "active",
-    memberSince: row.member_since ?? payload.memberSince ?? "",
-    branchName: row.branch_name ?? payload.branchName ?? "",
-    advisorName: row.advisor_name ?? payload.advisorName ?? "",
+    roleLabel: source.role_label ?? payload.roleLabel ?? "Personal Banking",
+    accountKind: source.account_kind ?? payload.accountKind ?? payload.id ?? "personal",
+    status: source.status ?? payload.status ?? "active",
+    memberSince: source.member_since ?? payload.memberSince ?? "",
+    branchName: source.branch_name ?? payload.branchName ?? "",
+    advisorName: source.advisor_name ?? payload.advisorName ?? "",
     pin: payload.pin ?? "",
   } as BankUserProfile);
 }
@@ -57,7 +65,7 @@ export async function fetchProfiles(): Promise<BankUserProfile[]> {
   }
 
   return (data ?? [])
-    .map((row) => normaliseProfileRow(row as SupabaseProfileRow))
+    .map((row) => profileFromRow(row as SupabaseProfileRow))
     .filter((profile): profile is BankUserProfile => Boolean(profile && profile.email));
 }
 
@@ -87,7 +95,7 @@ export async function fetchProfileByEmail(email: string): Promise<BankUserProfil
     return null;
   }
 
-  return data ? normaliseProfileRow(data as SupabaseProfileRow) : null;
+  return data ? profileFromRow(data as SupabaseProfileRow) : null;
 }
 
 export async function upsertProfile(profile: BankUserProfile) {
@@ -109,15 +117,15 @@ export async function upsertProfile(profile: BankUserProfile) {
   };
 
   // The public client only: a service-role key can never ship to a browser.
-  const { data, error } = await supabase
-    .from("profiles")
-    .upsert(payload, { onConflict: "email" })
-    .select()
-    .single();
+  //
+  // No `.select()` on purpose: echoing the row back meant every save also
+  // downloaded the full `profile_data` blob (~70 kB), which is pure latency for
+  // a caller that only needs "did it work".
+  const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "email" });
 
   if (error) {
     throw error;
   }
 
-  return { ok: true, data };
+  return { ok: true };
 }

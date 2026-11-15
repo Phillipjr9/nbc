@@ -1,5 +1,6 @@
 import type { BankUserProfile, SupportMessage } from "./bankingTypes";
 import { toIsoDate } from "../lib/dates";
+import { stableStringify } from "../lib/stableStringify";
 
 /**
  * Support conversation helpers.
@@ -168,6 +169,78 @@ export function mergeSupportThreads(
     byId.set(message.id, message);
   }
   return sortThread([...byId.values()]);
+}
+
+/**
+ * What one Support action changed on a profile.
+ *
+ * The thread is a document inside `profile_data`, so the cheap and safe way to
+ * store a message is to send *the message* to the database and let it append
+ * (see `support_thread_apply()`), instead of rewriting the whole profile. This
+ * type is the description of that delta:
+ *
+ * - `added` — messages the server has not seen yet;
+ * - `handoff` — the client just asked for a person;
+ * - `readFor` — read receipts to stamp for one side.
+ *
+ * Anything that is not purely a Support change returns `null`, and the caller
+ * saves the profile the normal way.
+ */
+export type SupportThreadPatch = {
+  added: SupportMessage[];
+  handoff: boolean;
+  readFor: SupportMessage["side"] | null;
+};
+
+const withoutThread = (profile: BankUserProfile): Record<string, unknown> => {
+  const { supportThread: _thread, supportHandoff: _handoff, ...rest } = profile;
+  return rest as Record<string, unknown>;
+};
+
+/**
+ * Describes a Support-only change between two copies of a profile.
+ *
+ * Returns `null` when any other field changed (a transfer, an address edit, a
+ * card block) — those must still be saved as a profile. Returns an empty patch
+ * when the Support data did not actually change, so no write happens at all.
+ */
+export function diffSupportThreadPatch(
+  prev: BankUserProfile,
+  next: BankUserProfile
+): SupportThreadPatch | null {
+  if (prev === next) return { added: [], handoff: false, readFor: null };
+  if (stableStringify(withoutThread(prev)) !== stableStringify(withoutThread(next))) return null;
+
+  const previous = supportThreadOf(prev);
+  const current = supportThreadOf(next);
+  const known = new Map(previous.map((message) => [message.id, message]));
+
+  const added = current.filter((message) => !known.has(message.id));
+
+  // Read receipts: did this side just mark the *other* side's messages read?
+  const markedClient = current.some((message) => {
+    const before = known.get(message.id);
+    return Boolean(before) && message.side === "support" && !before?.readByClient && message.readByClient;
+  });
+  const markedSupport = current.some((message) => {
+    const before = known.get(message.id);
+    return Boolean(before) && message.side === "client" && !before?.readBySupport && message.readBySupport;
+  });
+
+  // Both sides changing at once is not a single-actor action: save normally so
+  // nothing is dropped.
+  if (markedClient && markedSupport) return null;
+
+  return {
+    added,
+    handoff: next.supportHandoff === true && prev.supportHandoff !== true,
+    readFor: markedClient ? "client" : markedSupport ? "support" : null,
+  };
+}
+
+/** True when a patch actually has something for the server to do. */
+export function isActionablePatch(patch: SupportThreadPatch): boolean {
+  return patch.added.length > 0 || patch.handoff || patch.readFor !== null;
 }
 
 /* ------------------------------------------------------------------ *

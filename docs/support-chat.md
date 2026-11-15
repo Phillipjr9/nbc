@@ -150,19 +150,57 @@ administrator, agent name, bot or model.
 
 - The thread lives on the client profile (`supportThread`), so it travels with
   the existing `localStorage` mirror and the Supabase `profiles.profile_data`
-  sync — no schema change is required.
+  sync — no new table is required.
+- **Messages are appended, not re-written.** `supabase/support-thread.sql`
+  installs `support_thread_apply(email, messages, handoff, read_for)`, which
+  appends the new messages inside the database, under a row lock, de-duplicated
+  by message id, and returns the canonical thread (plus read receipts and the
+  "asked for a person" flag). One line costs one small request instead of a
+  ~70 kB profile rewrite, and two devices can no longer overwrite each other.
+  The browser falls back to whole-profile saves if the function is missing.
+- Set up once per project: run `supabase/support-thread.sql` and
+  `supabase/realtime.sql`. Both are idempotent; the app degrades gracefully
+  without either.
 - **Realtime (default path).** `src/lib/profileRealtime.ts` subscribes to
-  `postgres_changes` on `public.profiles`, so a client message or a desk reply
-  reaches the other side in well under a second. Row changes are coalesced
-  (350 ms) so one write does not trigger several renders.
+  `postgres_changes` on `public.profiles` and **applies the row that arrived**
+  instead of re-downloading the table. A row change reaches the other side in
+  well under a second; bursts are coalesced (120 ms) and a dropped socket
+  reconnects with a capped backoff.
   - Requires `supabase/realtime.sql` once per project. Without it the channel
-    reports `offline` and the app behaves exactly as before.
-- **Poll fallback.** Profiles are polled every 15 s while realtime is
-  unavailable and every 120 s once the channel is live (safety net only).
+    reports `offline` and the poll takes over.
+- **Poll fallback.** 5 s while realtime is down, 30 s while it is live. The open
+  conversation also refreshes its own row every 4 s, so chat keeps moving even
+  mid-reconnect.
 - `mergeSupportThreads()` unions the server and local copies by message id, so a
   message written on a second device is never lost by last-write-wins.
 - Demo data: the personal profile ships with one Support message and one client
   question, so the inbox shows an unread item immediately.
+
+### Why the conversation used to lag ("not on time", "not constant")
+
+Three faults compounded, and all three are fixed:
+
+1. **An echo loop.** Every state change on the signed-in profile was saved back
+   to Supabase — *including the profile Realtime had just delivered*. Two
+   devices therefore wrote the same row back and forth forever: the table had
+   **7,912 updates on 7 rows**. Every one of those events also triggered a full
+   `profiles` table download (~220 kB of JSON) on each open device, so a single
+   Support line sat behind a queue of pointless traffic.
+   - Fixed by remembering a stable signature of the last server-confirmed
+     profile (`src/lib/stableStringify.ts`) and skipping the write when nothing
+     local changed, plus a hard brake: at most 6 saves per profile per 10 s.
+2. **Whole-document writes.** A message rewrote the entire profile, so a desk
+   reply and a client message sent at the same moment were last-writer-wins:
+   one of them vanished, then came back on the next poll. That is the "not
+   constant" part. Fixed by `support_thread_apply()` (append instead of
+   overwrite).
+3. **Slow, coarse updates.** Applying a change meant downloading the whole
+   table, and the poll was 15 s (120 s while "live"). Fixed by applying the
+   Realtime row directly, polling one row per open conversation, and shortening
+   the offline poll to 5 s.
+
+The chat also stops holding your words back: a second message is no longer
+blocked by the assistant's "typing" beat.
 
 ## Try it
 
@@ -194,6 +232,7 @@ administrator, agent name, bot or model.
 | `src/__tests__/publicAssistant.test.ts` | The signed-out topics and their links, greetings, and that nothing names a bot, model or staff member |
 | `src/__tests__/supportChat.test.ts` | Thread append/read/merge, desk notification gating (`awaitingDesk` only), idempotent read marks, ordering, the specialist handoff |
 | `src/__tests__/supportChatWidget.test.tsx` | One launcher only, the direct “Talk to a person now” control, and the specialist status line replacing it |
+| `src/__tests__/supportSync.test.ts` | The append-only patch (messages / read receipts / handoff, and the edits that must *not* take this path), stable profile signatures, and the RPC's fallback when it is not deployed |
 | `src/__tests__/dates.test.ts` | Local-calendar ledger dates (the “history moved by a day” bug) |
 | `src/__tests__/profileNormalize.test.ts` | Partial/legacy profile repair, the write-back guard, ledger sort |
 
