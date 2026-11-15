@@ -17,6 +17,7 @@ import {
   transactionNotifications,
 } from "../banking/bankingTypes";
 import BankCardVisual from "./BankCardVisual";
+import SupportChat from "./SupportChat";
 import { BankCard } from "../banking/bankingTypes";
 import { randomDigits } from "../banking/adminOps";
 import { toIsoDate, todayIso as localTodayIso } from "../lib/dates";
@@ -3570,6 +3571,9 @@ export default function Dashboard({
           </div>
         )}
       </main>
+
+      {/* Private one-to-one conversation with the Support desk */}
+      <SupportChat profile={profile} onUpdateProfile={updateProfile} />
     </div>
   );
 }
