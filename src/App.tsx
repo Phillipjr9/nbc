@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AuditLogEntry,
   BankUserProfile,
@@ -101,6 +101,63 @@ const sanitizeCustomProfiles = (profiles: BankUserProfile[] = []): BankUserProfi
       cards: normalizeBankCardList(profile.cards),
     }));
 
+/** Merge two arrays by unique `id`, keeping local entries and appending new remote entries. */
+const mergeByUniqueId = <T extends { id: string }>(local: T[], remote: T[]): T[] => {
+  const localIds = new Set(local.map((t) => t.id));
+  const merged = [...local];
+  for (const item of remote) {
+    if (!localIds.has(item.id)) {
+      merged.push(item);
+    }
+  }
+  return merged;
+};
+
+/** Merge remote profiles into the built-in profiles Record (personal/business/wealth).
+ * Built-in profiles are identified by their `id` matching the key ("personal", "business", "wealth").
+ * Local changes take priority; new remote entries (e.g. reversals) are merged in. */
+const mergeRemoteProfilesIntoBuiltIn = (
+  local: Record<"personal" | "business" | "wealth", BankUserProfile>,
+  remote: BankUserProfile[]
+): Record<"personal" | "business" | "wealth", BankUserProfile> => {
+  const result = { ...local };
+  for (const rp of remote) {
+    const key = rp.id === "personal" || rp.id === "business" || rp.id === "wealth"
+      ? (rp.id as "personal" | "business" | "wealth")
+      : null;
+    if (!key || !result[key]) continue;
+    const current = result[key];
+    result[key] = {
+      ...rp, // base from remote
+      email: normalizeCredentialString(current.email) || rp.email,
+      fullName: current.fullName || rp.fullName || "",
+      roleLabel: current.roleLabel || rp.roleLabel || "Personal Banking",
+      accountKind: current.accountKind || rp.accountKind || (rp.id === "custom" ? undefined : rp.id) || "personal",
+      status: current.status || rp.status || "active",
+      memberSince: current.memberSince || rp.memberSince || "",
+      branchName: current.branchName || rp.branchName || "",
+      advisorName: current.advisorName || rp.advisorName || "",
+      password: normalizeCredentialString(current.password) || normalizeCredentialString(rp.password) || "",
+      pin: normalizeCredentialString(current.pin) || normalizeCredentialString(rp.pin) || "1988",
+      address: current.address || rp.address || "",
+      city: current.city || rp.city || "",
+      province: current.province || rp.province || "",
+      postalCode: current.postalCode || rp.postalCode || "",
+      dateOfBirth: current.dateOfBirth || rp.dateOfBirth || "",
+      sin: current.sin || rp.sin || "",
+      businessNumber: current.businessNumber || rp.businessNumber || "",
+      notes: current.notes || rp.notes || "",
+      goals: mergeByUniqueId(current.goals, rp.goals),
+      payees: mergeByUniqueId(current.payees, rp.payees),
+      recipients: mergeByUniqueId(current.recipients, rp.recipients),
+      cards: normalizeBankCardList(mergeByUniqueId(current.cards, rp.cards)),
+      transactions: mergeByUniqueId(current.transactions, rp.transactions),
+      accounts: mergeByUniqueId(current.accounts, rp.accounts),
+    };
+  }
+  return result;
+};
+
 const mergeRemoteProfiles = (existing: BankUserProfile[], remote: BankUserProfile[]): BankUserProfile[] => {
   const merged = sanitizeCustomProfiles(existing);
 
@@ -130,13 +187,13 @@ const mergeRemoteProfiles = (existing: BankUserProfile[], remote: BankUserProfil
         sin: local.sin || profile.sin || "",
         businessNumber: local.businessNumber || profile.businessNumber || "",
         notes: local.notes || profile.notes || "",
-        goals: local.goals.length > 0 ? local.goals : profile.goals,
-        payees: local.payees.length > 0 ? local.payees : profile.payees,
-        recipients: local.recipients.length > 0 ? local.recipients : profile.recipients,
-        cards: normalizeBankCardList(local.cards.length > 0 ? local.cards : profile.cards),
-        // Transactions: local always wins — admin/recent changes must not be overwritten
-        transactions: local.transactions.length > 0 ? local.transactions : profile.transactions,
-        accounts: local.accounts.length > 0 ? local.accounts : profile.accounts,
+        // Merge arrays by unique id: keep local entries, append new remote entries
+        goals: mergeByUniqueId(local.goals, profile.goals),
+        payees: mergeByUniqueId(local.payees, profile.payees),
+        recipients: mergeByUniqueId(local.recipients, profile.recipients),
+        cards: normalizeBankCardList(mergeByUniqueId(local.cards, profile.cards)),
+        transactions: mergeByUniqueId(local.transactions, profile.transactions),
+        accounts: mergeByUniqueId(local.accounts, profile.accounts),
       };
     } else {
       merged.push({
@@ -169,6 +226,12 @@ export default function App() {
     const stored = loadStored<BankUserProfile[]>(STORAGE_CUSTOM_KEY, []);
     return sanitizeCustomProfiles(Array.isArray(stored) ? stored : []);
   });
+  // Refs to always-accessible latest state for the async sync loop.
+  const profilesRef = useRef(profiles);
+  const customProfilesRef = useRef(customProfiles);
+  useEffect(() => { profilesRef.current = profiles; }, [profiles]);
+  useEffect(() => { customProfilesRef.current = customProfiles; }, [customProfiles]);
+
   useEffect(() => {
     if (!isSupabaseConfigured) return;
 
@@ -180,7 +243,10 @@ export default function App() {
         const remoteProfiles = await fetchProfiles();
         if (!isMounted) return;
 
-        setCustomProfiles((prev) => mergeRemoteProfiles(prev, remoteProfiles));
+        const nextCustom = mergeRemoteProfiles(customProfilesRef.current, remoteProfiles);
+        const nextBuiltIn = mergeRemoteProfilesIntoBuiltIn(profilesRef.current, remoteProfiles);
+        setCustomProfiles(nextCustom);
+        setProfiles(nextBuiltIn);
       } catch (error) {
         console.warn("Supabase profile sync skipped:", error);
       }
@@ -207,7 +273,7 @@ export default function App() {
   const [cookieConsent, setCookieConsent] = useState<boolean>(() => {
     const localConsent = loadStored<boolean | null>(STORAGE_COOKIE_CONSENT_KEY, null);
     const cookieConsentValue = readCookie(STORAGE_COOKIE_CONSENT_KEY);
-    return localConsent ?? cookieConsentValue === "accepted" ?? false;
+    return localConsent ?? cookieConsentValue === "accepted";
   });
   const [adminAuth, setAdminAuth] = useState<boolean>(() =>
     loadStored<boolean>(STORAGE_ADMIN_AUTH_KEY, false)
@@ -426,28 +492,24 @@ export default function App() {
     });
 
     if (key === "personal" || key === "business" || key === "wealth") {
-      setProfiles(async (prev) => {
+      setProfiles((prev) => {
         const next = normalizeProfile(updater(prev[key]));
         // Persist to Supabase so remote sync cannot overwrite admin changes.
-        // Await so the write completes before the state update is considered done.
+        // Fire-and-forget: the 15s sync loop will retry if this write fails.
         if (isSupabaseConfigured) {
-          try { await upsertProfile(next); } catch (err) {
-            console.warn("Supabase profile upsert failed:", err);
-          }
+          upsertProfile(next).catch((err) => console.warn("Supabase profile upsert failed:", err));
         }
         return { ...prev, [key]: next };
       });
     } else {
-      setCustomProfiles(async (prev) => {
+      setCustomProfiles((prev) => {
         const next = prev.map((cp) =>
           cp.email.toLowerCase() === key.toLowerCase() ? normalizeProfile(updater(cp)) : cp
         );
         // Persist to Supabase so remote sync cannot overwrite admin changes.
         const updated = next.find((cp) => cp.email.toLowerCase() === key.toLowerCase());
         if (isSupabaseConfigured && updated) {
-          try { await upsertProfile(updated); } catch (err) {
-            console.warn("Supabase profile upsert failed:", err);
-          }
+          upsertProfile(updated).catch((err) => console.warn("Supabase profile upsert failed:", err));
         }
         return next;
       });
