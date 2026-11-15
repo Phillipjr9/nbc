@@ -3,6 +3,7 @@ import { logoNbc } from "../assets/nbcAssets";
 import {
   AdminOps,
   AdminTabId,
+  AdminTransactionInput,
   ROLE_LABEL,
   applyAdminTransaction,
   auditCsv,
@@ -49,6 +50,13 @@ type Props = {
   onSignOut: () => void;
 };
 
+type PanelProps = {
+  ops: AdminOps;
+  selectedKey: string;
+  onSelectKey: (key: string) => void;
+  onOpenTab: (next: AdminTabId, key?: string) => void;
+};
+
 const TAB_LABEL: Record<AdminTabId, string> = {
   overview: "Overview",
   clients: "Clients",
@@ -86,7 +94,7 @@ export default function AdminDashboard({
   onGoPublicSite,
   onSignOut,
 }: Props) {
-  const [tab, setTab] = useState<AdminTabId | "analytics" | "search" | "roles">("overview");
+  const [tab, setTab] = useState<AdminTabId | "analytics" | "search" | "roles" | "customers" | `customer-${string}`>("overview");
   // When a client is selected, their own tabs (overview/transactions/accounts/cards)
   // replace the global tabs so each client sees only their own data.
   const [clientTab, setClientTab] = useState<"overview" | "transactions" | "accounts" | "cards" | null>(null);
@@ -129,7 +137,7 @@ export default function AdminDashboard({
     notify,
   };
 
-  const panelProps = {
+  const panelProps: PanelProps = {
     ops,
     selectedKey,
     onSelectKey: setSelectedKey,
@@ -182,9 +190,13 @@ export default function AdminDashboard({
     return { deposits, credit, accounts, entries, cards, lockedCards, frozen, unverified, todayCredits, todayDebits };
   }, [users]);
 
+  // Collect customer tabs from state (tabs for individual customer profiles)
+  const customerTabIds = tab === "customers" ? [] : tab.startsWith("customer-") ? [tab] : [];
   const allTabs = [
     ...(Object.keys(TAB_LABEL) as AdminTabId[]),
     ...EXTRA_TABS.map(([id]) => id as "analytics" | "search" | "roles"),
+    "customers",
+    ...customerTabIds,
   ];
 
   const labelFor = (id: string) =>
@@ -228,6 +240,15 @@ export default function AdminDashboard({
               <LockIcon className="h-3.5 w-3.5 flex-none" />
               Sign out
             </button>
+            <CustomerSelector
+              users={users}
+              selectedKey={selectedKey}
+              onSelect={(key) => {
+                setSelectedKey(key);
+                setClientTab("overview");
+                setTab(`customer-${key}`);
+              }}
+            />
           </div>
         </div>
       </div>
@@ -263,26 +284,55 @@ export default function AdminDashboard({
             )}
           </div>
         </div>
-        <div className="border-t border-[#efefef]">
-          <div className="nbc-container scroll-tabs">
-            {allTabs.map((id) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setTab(id)}
-                className={`border-b-[3px] px-3.5 py-3 text-[13.5px] transition ${
-                  tab === id ? "border-nbc-red font-semibold text-nbc-navy" : "border-transparent text-[#565656] hover:text-nbc-navy"
-                }`}
-              >
-                {labelFor(id)}
-                {id === "clients" && <span className="ml-1 text-[11.5px] text-[#777]">({users.length})</span>}
-                {id === "approvals" && pendingApprovals > 0 && (
-                  <span className="ml-1.5 rounded-full bg-nbc-red px-1.5 py-0.5 text-[10px] font-bold text-white">{pendingApprovals}</span>
-                )}
-              </button>
-            ))}
+          <div className="border-t border-[#efefef]">
+            <div className="nbc-container scroll-tabs">
+              {allTabs.map((id) => {
+                const isCustomerTab = id.startsWith("customer-");
+                const customerKey = isCustomerTab ? id.slice("customer-".length) : "";
+                const customer = users.find((u) => u.key === customerKey);
+                const label = isCustomerTab
+                  ? (customer ? `${customer.profile.fullName} · ${customer.profile.email}` : id)
+                  : labelFor(id);
+                const tabId = id as AdminTabId | "analytics" | "search" | "roles" | "customers" | `customer-${string}`;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => {
+                      if (isCustomerTab) {
+                        setClientTab("overview");
+                        setTab(tabId);
+                      } else {
+                        setTab(tabId);
+                      }
+                    }}
+                    className={`border-b-[3px] px-3.5 py-3 text-[13.5px] transition ${
+                      tab === id ? "border-nbc-red font-semibold text-nbc-navy" : "border-transparent text-[#565656] hover:text-nbc-navy"
+                    }`}
+                  >
+                    {label}
+                    {!isCustomerTab && id === "approvals" && pendingApprovals > 0 && (
+                      <span className="ml-1.5 rounded-full bg-nbc-red px-1.5 py-0.5 text-[10px] font-bold text-white">{pendingApprovals}</span>
+                    )}
+                    {isCustomerTab && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setTab("customers");
+                          setClientTab(null);
+                        }}
+                        className="ml-1.5 rounded-full bg-[#f0f0f0] px-1 text-[10px] leading-none text-[#666] hover:bg-[#e0e0e0] hover:text-[#333]"
+                        title="Close customer tab"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
       </header>
 
       {toast && (
@@ -419,6 +469,24 @@ export default function AdminDashboard({
           </div>
         )}
 
+        {/* Customer tab: each bank customer gets their own tab */}
+        {tab.startsWith("customer-") && clientTab !== null && (
+          <CustomerDetailPanel
+            clientKey={tab.slice("customer-".length)}
+            clientTab={clientTab}
+            setClientTab={setClientTab}
+            onClose={() => {
+              setTab("customers");
+              setClientTab(null);
+            }}
+            ops={ops}
+            users={users}
+            selectedKey={selectedKey}
+            onSelectKey={setSelectedKey}
+            onOpenTab={panelProps.onOpenTab}
+          />
+        )}
+
         {/* Client detail view: when a client is selected, show their own tabs */}
         {clientTab && selectedKey && (
           <ClientDetailView
@@ -428,6 +496,13 @@ export default function AdminDashboard({
             setClientTab={setClientTab}
             onBack={() => setClientTab(null)}
             {...panelProps}
+          />
+        )}
+
+        {tab === "customers" && (
+          <CustomerListPanel
+            users={users}
+            onSelect={(key) => { setSelectedKey(key); setClientTab("overview"); setTab(`customer-${key}`); }}
           />
         )}
 
@@ -905,6 +980,127 @@ function PostTransactionForm({
   );
 }
 
+function CustomerDetailPanel({
+  clientKey,
+  clientTab,
+  setClientTab,
+  onClose,
+  ops,
+  users: _users,
+  selectedKey: _selectedKey,
+  onSelectKey: _onSelectKey,
+  onOpenTab: _onOpenTab,
+}: {
+  clientKey: string;
+  clientTab: "overview" | "transactions" | "accounts" | "cards";
+  setClientTab: (t: "overview" | "transactions" | "accounts" | "cards") => void;
+  onClose: () => void;
+  ops: AdminOps;
+  users: AdminOps["users"];
+  selectedKey: string;
+  onSelectKey: (key: string) => void;
+  onOpenTab: (next: AdminTabId, key?: string) => void;
+}) {
+  const user = ops.users.find((u) => u.key === clientKey);
+  if (!user) return <p className="p-6 text-center text-[#777]">Customer not found.</p>;
+  const p = user.profile;
+
+  return (
+    <div className="flex-1 bg-[#f8f6f1] pb-14">
+      {/* Top bar with close button */}
+      <div className="bg-nbc-navy">
+        <div className="nbc-container flex items-center justify-between gap-3 py-2.5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-[12.5px] font-semibold text-white transition hover:bg-white/20"
+          >
+            <span className="flex-none">←</span>
+            <span className="flex-none">All clients</span>
+          </button>
+          <div className="flex items-center gap-3">
+            <h1 className="text-[16px] font-bold text-white truncate max-w-[220px]">{p.fullName}</h1>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full bg-white/15 px-3 py-1 text-[12px] font-semibold text-white transition hover:bg-white/20"
+              title="Close tab"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+        {/* Customer sub-tabs */}
+        <div className="border-t border-[#3a4a5a]">
+          <div className="nbc-container scroll-tabs">
+            {([{ id: "overview", label: "Overview" }, { id: "transactions", label: "Transactions" }, { id: "accounts", label: "Accounts" }, { id: "cards", label: "Cards" }] as const).map((ct) => (
+              <button
+                key={ct.id}
+                type="button"
+                onClick={() => setClientTab(ct.id)}
+                className={`border-b-[3px] px-3.5 py-3 text-[13.5px] transition ${
+                  clientTab === ct.id ? "border-nbc-red font-semibold text-white" : "border-transparent text-white/80 hover:text-white hover:bg-white/10"
+                }`}
+              >
+                {ct.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Delegate to ClientDetailView for the actual content */}
+      <ClientDetailView
+        clientKey={clientKey}
+        clientTab={clientTab}
+        setClientTab={setClientTab}
+        onBack={onClose}
+        ops={ops}
+      />
+    </div>
+  );
+}
+
+function CustomerListPanel({
+  users,
+  onSelect,
+}: {
+  users: AdminOps["users"];
+  onSelect: (key: string) => void;
+}) {
+  return (
+    <div className="nbc-container py-7">
+      <div className="mb-6">
+        <h1 className="text-[25px] font-bold text-nbc-navy sm:text-[28px]">All customers</h1>
+        <p className="mt-1 text-[13.5px] text-[#565656]">{users.length} customer profiles · Select a customer to view details</p>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {users.map((u) => {
+          const p = u.profile;
+          return (
+            <button
+              key={u.key}
+              type="button"
+              onClick={() => onSelect(u.key)}
+              className="rounded-[6px] border border-[#e5e2da] bg-white p-4 text-left transition hover:border-nbc-navy hover:bg-[#fcfbf8]"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-[14px] font-semibold text-nbc-navy">{p.fullName}</p>
+                {p.status === "frozen" && <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">ON HOLD</span>}
+              </div>
+              <p className="mt-1 text-[12px] text-[#777]">{p.email}</p>
+              <p className="mt-1 text-[12.5px] text-nbc-navy font-medium">{p.roleLabel} · {p.branchName}</p>
+              <p className="mt-2 text-[11.5px] text-[#999]">
+                {p.accounts.length} accounts · {p.cards.length} cards · {p.transactions.length} transactions
+              </p>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function Kpi({ label, value, sub, alert = false }: { label: string; value: string; sub: string; alert?: boolean }) {
   return (
     <div className={`rounded-[6px] border bg-white p-4 ${alert ? "border-l-4 border-[#e5e2da] border-l-nbc-red" : "border-[#e5e2da]"}`}>
@@ -921,6 +1117,81 @@ function MiniStat({ label, value, tone }: { label: string; value: string; tone: 
     <div className="rounded-[6px] border border-[#e5e2da] bg-[#fcfbf8] px-4 py-3">
       <p className="text-[11.5px] text-[#777]">{label}</p>
       <p className={`mt-0.5 text-[17px] font-bold tabular-nums ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function CustomerSelector({
+  users,
+  selectedKey,
+  onSelect,
+}: {
+  users: AdminOps["users"];
+  selectedKey: string;
+  onSelect: (key: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selected = users.find((u) => u.key === selectedKey);
+
+  const filtered = query.trim()
+    ? users.filter((u) => {
+        const p = u.profile;
+        const q = query.toLowerCase();
+        return p.fullName.toLowerCase().includes(q) || p.email.toLowerCase().includes(q);
+      })
+    : users;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="rounded-full border border-[#c9c3b6] bg-white px-3 py-1.5 text-[12.5px] font-semibold text-nbc-navy transition hover:border-nbc-navy flex items-center gap-1.5"
+      >
+        <span className="text-[11px] font-normal text-[#777]">Customer:</span>
+        <span className="max-w-[140px] truncate">{selected ? selected.profile.fullName : "Select..."}</span>
+        <span className="text-[#999] text-[10px]">▾</span>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-50 w-[300px] rounded-[6px] border border-[#e5e2da] bg-white shadow-lg">
+          <div className="border-b border-[#e5e2da] px-3 py-2">
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by name or email..."
+              className="w-full rounded-[4px] border border-[#c9c3b6] bg-white px-2.5 py-1.5 text-[13px]"
+            />
+          </div>
+          <div className="max-h-[280px] overflow-y-auto">
+            {filtered.length === 0 && (
+              <p className="px-3 py-4 text-center text-[13px] text-[#777]">No customers found.</p>
+            )}
+            {filtered.map((u) => {
+              const p = u.profile;
+              const isActive = u.key === selectedKey;
+              return (
+                <button
+                  key={u.key}
+                  type="button"
+                  onClick={() => {
+                    onSelect(u.key);
+                    setOpen(false);
+                    setQuery("");
+                  }}
+                  className={`w-full px-3 py-2.5 text-left transition ${
+                    isActive ? "bg-[#fcfbf8] font-semibold text-nbc-navy" : "hover:bg-[#f8f6f1]"
+                  }`}
+                >
+                  <p className="text-[13.5px] font-semibold">{p.fullName}</p>
+                  <p className="text-[11.5px] text-[#777] truncate">{p.email}</p>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
