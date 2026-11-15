@@ -29,7 +29,7 @@ export async function getSupabaseSession() {
 export async function getCurrentUser(): Promise<{ email: string; id: string } | null> {
   const session = await getSupabaseSession();
   if (!session) return null;
-  return { email: session.email, id: session.id };
+  return { email: session.email ?? "", id: session.id };
 }
 
 /**
