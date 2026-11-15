@@ -70,6 +70,7 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
   const [visibleCount, setVisibleCount] = useState(25);
   const [editingTx, setEditingTx] = useState<{ userKey: string; tx: Transaction } | null>(null);
   const [reversalReason, setReversalReason] = useState<string>(REVERSAL_REASONS[0]);
+  const [customReversalReason, setCustomReversalReason] = useState<string>("");
   const [pendingReversal, setPendingReversal] = useState<{ userKey: string; tx: Transaction } | null>(null);
 
   const rows = useMemo(() => {
