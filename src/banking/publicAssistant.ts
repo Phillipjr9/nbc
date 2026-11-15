@@ -11,6 +11,8 @@
  * "Support". Nothing here may name a back-office person, a bot or a model.
  */
 
+import { SUPPORT_EMAIL, SUPPORT_EMAIL_HREF } from "./supportChat";
+
 export type PublicLink = { label: string; href: string };
 
 export type PublicTopic =
@@ -56,8 +58,9 @@ export function answerPublicQuestion(raw: string): PublicAnswer {
     return {
       topic: "person",
       reply:
-        "Happy to put you through. The quickest ways to reach a person:\n• Call 1-888-835-6281 (Canada/U.S.) or 1-514-394-5000 (elsewhere) — 24/7\n• Sign in and open Support chat, then choose “Talk to a person now”: a specialist joins the conversation and replies there.\n• Book an appointment in branch, by phone or by video.",
+        `Happy to put you through. The quickest ways to reach a person:\n• Call 1-888-835-6281 (Canada/U.S.) or 1-514-394-5000 (elsewhere) — 24/7\n• Email ${SUPPORT_EMAIL} — answered by our Client Services team\n• Sign in and open Support chat, then choose “Talk to a person now”: a specialist joins the conversation and replies there.\n• Book an appointment in branch, by phone or by video.`,
       links: [
+        { label: "Email Support", href: SUPPORT_EMAIL_HREF },
         { label: "Contact us", href: "https://www.nbc.ca/contact-us.html" },
         { label: "Sign in to chat with Support", href: "https://app.bnc.ca/?lang=en" },
       ],
@@ -161,9 +164,9 @@ export function answerPublicQuestion(raw: string): PublicAnswer {
 
   return {
     topic: "fallback",
-    reply:
-      "We can help with accounts, mortgages, savings and rates, credit cards, fraud prevention or booking an advisor. Sign in and ask us about your own file, or reach a person 7 days a week.",
+    reply: `We can help with accounts, mortgages, savings and rates, credit cards, fraud prevention or booking an advisor. Sign in and ask us about your own file, or reach a person 7 days a week — call 1-888-835-6281 or email ${SUPPORT_EMAIL}.`,
     links: [
+      { label: "Email Support", href: SUPPORT_EMAIL_HREF },
       { label: "Visit the Help centre", href: "https://www.nbc.ca/help.html" },
       { label: "Contact us", href: "https://www.nbc.ca/contact-us.html" },
     ],

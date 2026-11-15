@@ -96,6 +96,24 @@ conversation:
 - Thread list chips: **Needs reply** for escalated chats, **Handled by
   assistant** when the last message came from the assistant.
 
+## Contact channels
+
+One constant, `SUPPORT_EMAIL` in `src/banking/supportChat.ts`
+(`o41081419@gmail.com`), feeds every surface — change it there and the whole app
+follows:
+
+| Surface | Shows |
+| --- | --- |
+| Site footer | `Email: o41081419@gmail.com` (mailto) next to Client Services 24/7 phone |
+| Help centre header (`#support/help`) | “Email us” and the 24/7 phone, both clickable |
+| Support panel footer | “Prefer email? o41081419@gmail.com” |
+| Public assistant — “talk to a person” | The address as a channel plus an **Email Support** action link |
+| Public assistant — fallback | Quotes the address |
+| Signed-in assistant — hours/contact | Lists email alongside the phone numbers |
+| First acknowledgement in a new thread | Mentions the address as the urgent fallback |
+
+`mailto:` links open the mail client instead of routing inside the SPA.
+
 ## Talking to Support directly
 
 The assistant answers first, but the client is never trapped behind it.

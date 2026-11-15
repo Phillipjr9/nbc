@@ -1,6 +1,6 @@
 import type { BankUserProfile, SupportMessage, Transaction } from "./bankingTypes";
 import { formatMoney } from "./bankingTypes";
-import { formatSupportDay, isWithSpecialist, supportThreadOf } from "./supportChat";
+import { SUPPORT_EMAIL, formatSupportDay, isWithSpecialist, supportThreadOf } from "./supportChat";
 
 /**
  * Support assistant ("AI support").
@@ -298,7 +298,7 @@ export function generateSupportReply(
   // 11. Hours / contact.
   if (/(hours|open|close|phone|contact|reach you|number)/.test(text)) {
     return {
-      reply: `We're here 24/7:\n• Phone: 1-888-835-6281 (Canada/U.S.) · 1-514-394-5000 (elsewhere)\n• This chat: replies from a specialist in a few minutes during business hours.\n• Appointments: Help centre → Book an appointment.`,
+      reply: `We're here 24/7:\n• Phone: 1-888-835-6281 (Canada/U.S.) · 1-514-394-5000 (elsewhere)\n• Email: ${SUPPORT_EMAIL}\n• This chat: replies from a specialist in a few minutes during business hours.\n• Appointments: Help centre → Book an appointment.`,
       intent: "hours",
       confidence: 0.9,
       escalate: false,
