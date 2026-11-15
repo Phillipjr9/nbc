@@ -3090,12 +3090,21 @@ export default function BusinessDashboard({
                         onChange={(e) => setBusinessCardId(e.target.value)}
                         className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
                       >
-                        {profile.cards.map((card) => (
-                          <option key={card.id} value={card.id}>
-                            {card.label} · {card.last4}
-                          </option>
-                        ))}
+                        {profile.cards.length === 0 ? (
+                          <option value="">— No cards on file —</option>
+                        ) : (
+                          profile.cards.map((card) => (
+                            <option key={card.id} value={card.id}>
+                              {card.label} · {card.last4} {card.linkedAccountId ? `(linked to ${profile.accounts.find((a) => a.id === card.linkedAccountId)?.name ?? card.linkedAccountId})` : "(not linked)"}
+                            </option>
+                          ))
+                        )}
                       </select>
+                      {profile.cards.length === 0 && (
+                        <p className="mt-1.5 text-[12px] text-[#b91c1c]">
+                          No cards on file. Use the "Add another card" button above to issue a card first.
+                        </p>
+                      )}
                     </div>
 
                     <div>

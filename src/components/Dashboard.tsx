@@ -94,7 +94,7 @@ export default function Dashboard({
   const prefs: ClientPreferences = { ...DEFAULT_PREFERENCES, ...(profile.preferences ?? {}) };
 
   // Transfers & payments sub-navigation
-  const [moveMode, setMoveMode] = useState<"internal" | "card" | "etransfer" | "bills" | "deposit">("internal");
+  const [moveMode, setMoveMode] = useState<"internal" | "card" | "etransfer" | "bills" | "deposit" | "link-card">("internal");
 
   const sourceAccounts = useMemo(
     () => profile.accounts.filter((a) => a.category === "chequing" || a.category === "savings"),
@@ -527,8 +527,12 @@ export default function Dashboard({
     const linked = card ? profile.accounts.find((a) => a.id === card.linkedAccountId) : undefined;
     const targetAccount = profile.accounts.find((a) => a.id === cardSourceId) ?? sourceAccounts[0];
 
-    if (!card || !linked) {
-      notify("Link a card to your profile first to transfer funds.");
+    if (!card) {
+      notify("No card selected. Choose a card to transfer funds.");
+      return;
+    }
+    if (!linked) {
+      notify(`${card.label} is not linked to any account yet. Use the "Link card to account" section above to link it first.`);
       return;
     }
 
@@ -1410,6 +1414,16 @@ export default function Dashboard({
                             <p className="break-words text-[13px] font-medium leading-[18px] text-[#121212]">
                               {tx.description}
                             </p>
+                            {tx.failureReason && (
+                              <p className="mt-0.5 truncate text-[11px] font-semibold text-[#b91c1c] bg-rose-50 px-1.5 py-0.5 rounded">
+                                Reversal reason: {tx.failureReason}
+                              </p>
+                            )}
+                            {tx.failureDetails && !tx.failureReason && (
+                              <p className="mt-0.5 truncate text-[11px] text-[#b91c1c]">
+                                {tx.failureDetails}
+                              </p>
+                            )}
                             <p className="mt-0.5 truncate text-[11.5px] text-[#666]">
                               <span className="tabular-nums">{tx.date}</span> · {acc?.name ?? tx.accountId}
                             </p>
@@ -1757,6 +1771,16 @@ export default function Dashboard({
                             <p className="break-words text-[13px] font-medium leading-[18px] text-[#121212]">
                               {tx.description}
                             </p>
+                            {tx.failureReason && (
+                              <p className="mt-0.5 truncate text-[11px] font-semibold text-[#b91c1c] bg-rose-50 px-1.5 py-0.5 rounded">
+                                Reversal reason: {tx.failureReason}
+                              </p>
+                            )}
+                            {tx.failureDetails && !tx.failureReason && (
+                              <p className="mt-0.5 truncate text-[11px] text-[#b91c1c]">
+                                {tx.failureDetails}
+                              </p>
+                            )}
                             <p className="mt-0.5 truncate text-[11.5px] text-[#666]">
                               <span className="tabular-nums">{tx.date}</span> · {tx.category} · {acc?.name ?? tx.accountId}
                             </p>
@@ -1818,6 +1842,16 @@ export default function Dashboard({
                               <span className="ml-2 text-[12px] font-normal text-[#777]">
                                 · {tx.category}
                               </span>
+                              {tx.failureReason && (
+                                <span className="mt-1 block text-[11px] font-semibold text-[#b91c1c] bg-rose-50 px-1.5 py-0.5 rounded sm:inline-block">
+                                  Reversal reason: {tx.failureReason}
+                                </span>
+                              )}
+                              {tx.failureDetails && !tx.failureReason && (
+                                <span className="mt-1 block text-[11px] text-[#b91c1c] sm:inline-block">
+                                  {tx.failureDetails}
+                                </span>
+                              )}
                               <span className="mt-0.5 block text-[12px] font-normal text-[#777] md:hidden">
                                 {acc?.name ?? tx.accountId}
                               </span>
@@ -2034,7 +2068,7 @@ export default function Dashboard({
 
                 <div>
                   <label htmlFor="card-select" className="block text-[13px] font-semibold text-[#121212]">
-                    Linked card
+                    Select a card
                   </label>
                   <select
                     id="card-select"
@@ -2042,11 +2076,15 @@ export default function Dashboard({
                     onChange={(e) => setCardId(e.target.value)}
                     className="mt-1.5 w-full rounded-[6px] border border-[#c9c3b6] bg-white px-3 py-2.5 text-[14px] text-nbc-navy"
                   >
-                    {profile.cards.map((card) => (
-                      <option key={card.id} value={card.id}>
-                        {card.label} · {card.number ?? `•••• ${card.last4}`}
-                      </option>
-                    ))}
+                    {profile.cards.length === 0 ? (
+                      <option value="">— No cards on file —</option>
+                    ) : (
+                      profile.cards.map((card) => (
+                        <option key={card.id} value={card.id}>
+                          {card.label} · {card.number ?? `•••• ${card.last4}`} {card.linkedAccountId ? `(linked to ${profile.accounts.find((a) => a.id === card.linkedAccountId)?.name ?? card.linkedAccountId})` : "(not linked)"}
+                        </option>
+                      ))
+                    )}
                   </select>
                   {profile.cards.length > 0 && (
                     <div className="mt-2 space-y-2">
@@ -2078,6 +2116,11 @@ export default function Dashboard({
                         Link card to account
                       </button>
                     </div>
+                  )}
+                  {profile.cards.length === 0 && (
+                    <p className="mt-2 text-[12px] text-[#b91c1c]">
+                      No cards on file. Switch to "Link a card" above to connect a card to your profile first.
+                    </p>
                   )}
                 </div>
 
