@@ -825,7 +825,7 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
             ops.notify("Ledger entry updated (balances are not recalculated).");
             setEditingTx(null);
           }}
-          className="grid gap-2.5 rounded-[6px] border border-[#e5e2da] bg-[#fcfbf8] p-4 sm:grid-cols-2 lg:grid-cols-6"
+          className="grid gap-2.5 rounded-[6px] border border-[#e5e2da] bg-[#fcfbf8] p-4 sm:grid-cols-2 lg:grid-cols-8"
         >
           <Field label="Date"><input name="date" type="date" className={inputCls} defaultValue={editingTx.tx.date} /></Field>
           <div className="lg:col-span-2">
@@ -980,7 +980,7 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
                 </span>
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                <button type="button" onClick={() => toggleStatus(r.userKey, r.tx)} className={`rounded-full px-2 py-0.5 text-[10.5px] font-bold ${
+                <button type="button" onClick={() => toggleStatus(r.userKey, r.tx)} className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
                   (r.tx.status ?? "Posted") === "Failed"
                     ? "bg-red-100 text-red-700"
                     : (r.tx.status ?? "Posted") === "Pending"
@@ -989,9 +989,9 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
                 }`}>
                   {r.tx.status ?? "Posted"}
                 </button>
-                <button type="button" onClick={() => setEditingTx({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2 py-0.5 text-[11px] font-semibold text-nbc-navy">Edit</button>
-                <button type="button" onClick={() => setPendingReversal({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2 py-0.5 text-[11px] font-semibold text-nbc-navy">Reverse</button>
-                <button type="button" onClick={() => deleteTx(r.userKey, r.tx)} className="rounded bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Delete</button>
+                <button type="button" onClick={() => setEditingTx({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2.5 py-1 text-[11.5px] font-semibold text-nbc-navy hover:bg-[#e0d9c8]">Edit</button>
+                <button type="button" onClick={() => setPendingReversal({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2.5 py-1 text-[11.5px] font-semibold text-nbc-navy hover:bg-amber-100">Reverse</button>
+                <button type="button" onClick={() => deleteTx(r.userKey, r.tx)} className="rounded bg-rose-100 px-2.5 py-1 text-[11.5px] font-semibold text-rose-700 hover:bg-rose-200">Delete</button>
               </div>
             </li>
           ))}
@@ -1002,12 +1002,12 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
           <table className="w-full table-fixed text-left text-[13px]">
             <thead className="border-b border-[#e5e2da] bg-[#faf9f6] text-[11px] uppercase tracking-wide text-[#565656]">
               <tr>
-                <th className="w-[92px] px-3 py-2.5">Date</th>
-                <th className="w-[165px] px-3 py-2.5">Client / account</th>
-                <th className="px-3 py-2.5">Description</th>
-                <th className="w-[82px] px-2 py-2.5">Status</th>
-                <th className="w-[112px] px-3 py-2.5 text-right">Amount</th>
-                <th className="w-[178px] px-3 py-2.5 text-right">Actions</th>
+                <th className="w-[80px] px-2 py-2.5">Date</th>
+                <th className="w-[140px] px-2 py-2.5">Client / account</th>
+                <th className="px-2 py-2.5 min-w-[200px]">Description</th>
+                <th className="w-[70px] px-2 py-2.5">Status</th>
+                <th className="w-[100px] px-2 py-2.5 text-right">Amount</th>
+                <th className="px-2 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[#efefef]">
@@ -1044,11 +1044,11 @@ export default function AdminTransactions({ ops, selectedKey, onSelectKey }: Adm
                   <td className={`whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums ${r.tx.amount >= 0 ? "text-[#017a33]" : "text-[#121212]"}`}>
                     {r.tx.amount >= 0 ? `+${formatMoney(r.tx.amount, r.currency)}` : formatMoney(r.tx.amount, r.currency)}
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-right">
-                    <div className="inline-flex gap-1">
-                      <button type="button" onClick={() => setEditingTx({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2 py-0.5 text-[11px] font-semibold text-nbc-navy hover:bg-[#e8e3d8]">Edit</button>
-                      <button type="button" onClick={() => setPendingReversal({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2 py-0.5 text-[11px] font-semibold text-nbc-navy hover:bg-amber-100">Reverse</button>
-                      <button type="button" onClick={() => deleteTx(r.userKey, r.tx)} className="rounded bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700 hover:bg-rose-200">Delete</button>
+                  <td className="whitespace-nowrap px-2 py-2.5 text-right">
+                    <div className="inline-flex flex-wrap items-center gap-1 justify-end">
+                      <button type="button" onClick={() => setEditingTx({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2.5 py-1 text-[11.5px] font-semibold text-nbc-navy hover:bg-[#e0d9c8] min-w-[56px]">Edit</button>
+                      <button type="button" onClick={() => setPendingReversal({ userKey: r.userKey, tx: r.tx })} className="rounded bg-[#f4f1ea] px-2.5 py-1 text-[11.5px] font-semibold text-nbc-navy hover:bg-amber-100 min-w-[56px]">Reverse</button>
+                      <button type="button" onClick={() => deleteTx(r.userKey, r.tx)} className="rounded bg-rose-100 px-2.5 py-1 text-[11.5px] font-semibold text-rose-700 hover:bg-rose-200 min-w-[56px]">Delete</button>
                     </div>
                   </td>
                 </tr>
