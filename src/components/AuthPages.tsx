@@ -3,17 +3,16 @@ import { logoNbc, pictoInsuranceTheft, pictoOrdinateur } from "../assets/nbcAsse
 import {
   BankUserProfile,
   formatMoney,
-  INITIAL_PROFILES,
   LoginPortal,
   PageRoute,
   PersonaId,
 } from "../banking/bankingTypes";
 import { ADMIN_ACCOUNTS, AdminIdentity, authenticateAdmin } from "../banking/adminOps";
+import { normalizeCredentialInput, resolveSignIn } from "../banking/signInResolution";
 import { ArrowRight, LockIcon } from "./icons";
 import { signInWithEmail, resetPassword as supabaseResetPassword } from "../lib/supabaseAuth";
 import { isSupabaseConfigured } from "../lib/supabase";
 import { fetchProfileByEmail, fetchProfiles } from "../lib/profileSync";
-import { ensureProfileShape } from "../lib/profileNormalize";
 import { todayIso as localTodayIso } from "../lib/dates";
 
 type LoginPageProps = {
@@ -73,8 +72,22 @@ export function LoginPage({
     setError("");
   };
 
-  const normalizeCredentialInput = (value: string) =>
-    value.replace(/[\u00A0\u200B-\u200D\uFEFF]/g, "").trim();
+  const fetchRemoteProfile = async (cleanEmail: string): Promise<BankUserProfile | null> => {
+    if (!isSupabaseConfigured) return null;
+    try {
+      const single = await fetchProfileByEmail(cleanEmail);
+      if (single) return single;
+      // Legacy fallback for rows the single-row read cannot see (e.g. the
+      // device has never cached any client profile).
+      if (customProfiles.length === 0) {
+        const all = await fetchProfiles();
+        return all.find((p) => normalizeCredentialInput(p.email).toLowerCase() === cleanEmail) ?? null;
+      }
+    } catch (fetchError) {
+      console.warn("Profile sync failed during sign-in:", fetchError);
+    }
+    return null;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,136 +100,61 @@ export function LoginPage({
       return;
     }
 
-    // First, check for admin login (always available)
-    const admin = authenticateAdmin(cleanEmail.toLowerCase(), pass);
-    if (admin.ok) {
-      onSignInAdmin(admin.identity);
-      return;
-    }
+    const localProfile =
+      customProfiles.find((p) => normalizeCredentialInput(p.email).toLowerCase() === cleanEmail) ?? null;
 
-    // Try Supabase auth first if configured (more reliable across browsers)
-    let supabaseResult: { ok: boolean; error?: string; user?: { email: string; id: string } } | null = null;
-    if (isSupabaseConfigured) {
-      try {
-        supabaseResult = await signInWithEmail(cleanEmail, pass);
-      } catch (err: unknown) {
-        console.warn("Supabase signInWithPassword threw:", err);
-        supabaseResult = { ok: false, error: "Supabase sign-in error" };
-      }
-      if (supabaseResult && supabaseResult.ok && supabaseResult.user) {
-        // Supabase auth succeeded - now find the local profile
-        // Check custom profiles first
-        const authUser = supabaseResult.user;
-        const matchedCustom = customProfiles.find(
-          (p) => p.email.toLowerCase() === authUser.email.toLowerCase()
-        );
-        if (matchedCustom) {
-          setPendingProfile(matchedCustom);
-          setStep("pin");
-          return;
+    // Check Supabase Auth and pull the server's copy of the client record in
+    // parallel. Neither is trusted on its own — the password stored on the
+    // profile record is what the back office resets, so it decides the client
+    // route (see src/banking/signInResolution.ts).
+    const [supabaseAccepted, remoteProfile] = await Promise.all([
+      (async () => {
+        if (!isSupabaseConfigured) return false;
+        try {
+          const result = await signInWithEmail(cleanEmail, pass);
+          return Boolean(result?.ok && result.user);
+        } catch (err: unknown) {
+          console.warn("Supabase signInWithPassword threw:", err);
+          return false;
         }
+      })(),
+      fetchRemoteProfile(cleanEmail),
+    ]);
 
-        // Check built-in profiles
-        const builtIns: { persona: "personal" | "business" | "wealth"; password: string; pin: string }[] = [
-          { persona: "personal", password: "National2025!", pin: "7935" },
-          { persona: "business", password: "Business2025!", pin: "2486" },
-          { persona: "wealth", password: "Wealth2025!", pin: "6194" },
-        ];
-        const builtIn = builtIns.find(
-          (b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === authUser.email.toLowerCase()
-        );
-        if (builtIn) {
-          setPendingPersona(builtIn.persona);
-          setStep("pin");
-          return;
-        }
+    // Client route first, administrator desk only as the fallback: a client
+    // and an admin can share the same email address, and the shared username
+    // must never shadow the client's own account. The dedicated #/admin-login
+    // page remains the direct route for employees.
+    const resolution = resolveSignIn({
+      email: cleanEmail,
+      password: pass,
+      supabaseAccepted,
+      localProfile,
+      remoteProfile,
+    });
 
-        // Supabase accepted the password, but this device has never seen the
-        // profile (new browser, cleared storage, different country). Pull the
-        // real record instead of opening an empty placeholder — the placeholder
-        // had no accounts and no transactions, so the ledger looked wiped.
-        const remoteProfile = await fetchProfileByEmail(authUser.email);
-        if (remoteProfile) {
-          onSignInCustom(ensureProfileShape(remoteProfile));
-          setError("");
-          return;
-        }
-
-        setError(
-          "We verified your sign-in but could not load your banking profile. Please refresh and try again, or contact Client Services at 1-888-835-6281."
-        );
-        return;
-      }
-
-      // Supabase auth failed - don't show error yet, try local auth fallback first
-      // (GoTrue rejects SQL-created users, so we fall through to local auth below)
-      if (supabaseResult && supabaseResult.error && supabaseResult.error.includes("not configured")) {
-        // Supabase not configured - fall through to local auth
-      }
-    }
-
-    // Fall back to local authentication using profiles table data
-    // This is needed because GoTrue rejects SQL-created users
-    const matchedCustom = customProfiles.find((p) => normalizeCredentialInput(p.email).toLowerCase() === cleanEmail);
-    if (matchedCustom) {
-      const storedPassword = normalizeCredentialInput(matchedCustom.password ?? "");
-      if (storedPassword === pass) {
-        setPendingProfile(matchedCustom);
-        setStep("pin");
-        return;
-      }
-      setError("The password entered does not match our records.");
-      return;
-    }
-
-    // If custom profiles are empty (first visit), try to fetch them from Supabase REST API
-    if (customProfiles.length === 0 && isSupabaseConfigured) {
-      try {
-        const remoteProfiles = await fetchProfiles();
-        if (remoteProfiles.length > 0) {
-          const fetchedMatch = remoteProfiles.find((p) => normalizeCredentialInput(p.email).toLowerCase() === cleanEmail);
-          if (fetchedMatch) {
-            const storedPassword = normalizeCredentialInput(fetchedMatch.password ?? "");
-            if (storedPassword === pass) {
-              setPendingProfile(fetchedMatch);
-              setStep("pin");
-              return;
-            }
-            setError("The password entered does not match our records.");
-            return;
-          }
-        }
-      } catch (fetchError) {
-        console.warn("Profile sync failed during login fallback:", fetchError);
-      }
-    }
-
-    const builtIns: { persona: "personal" | "business" | "wealth"; password: string; pin: string }[] = [
-      { persona: "personal", password: "National2025!", pin: "7935" },
-      { persona: "business", password: "Business2025!", pin: "2486" },
-      { persona: "wealth", password: "Wealth2025!", pin: "6194" },
-    ];
-    const builtIn = builtIns.find((b) => INITIAL_PROFILES[b.persona].email.toLowerCase() === cleanEmail.toLowerCase());
-    if (builtIn) {
-      if (builtIn.password !== pass) {
-        setError("The password entered does not match our records.");
-        return;
-      }
-      setPendingPersona(builtIn.persona);
+    if (resolution.type === "customer-custom") {
+      setPendingProfile(resolution.profile);
       setStep("pin");
       return;
     }
 
-    // If Supabase is configured and we get here, it means auth failed, but
-    // local/custom profile records are still valid authentication sources for
-    // data-backed staff/client accounts that have not been created as Supabase
-    // Auth users yet.
-    if (isSupabaseConfigured) {
-      setError("Invalid email or password. Please try again.");
+    if (resolution.type === "customer-persona") {
+      setPendingPersona(resolution.persona);
+      setStep("pin");
       return;
     }
 
-    setError("We could not find an account with those credentials. Check your email and password.");
+    if (resolution.type === "admin") {
+      onSignInAdmin(resolution.identity);
+      return;
+    }
+
+    setError(
+      isSupabaseConfigured
+        ? "Invalid email or password. Please try again."
+        : "We could not find an account with those credentials. Check your email and password."
+    );
   };
 
   const handlePinSubmit = (e: React.FormEvent) => {

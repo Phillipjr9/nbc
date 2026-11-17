@@ -6,6 +6,30 @@ client's support conversation is reachable from their own file.
 
 Sign in at `#admin-login` (`admin@nbc.ca` / `admin1234`).
 
+## Sign-in precedence (universal `#login` form)
+
+A client and an administrator can share the same email/sign-in ID. The
+universal sign-in form (`/#/login`) therefore resolves the **client route
+first** and the administrator desk only as a fallback — a shared username can
+never shadow the client's own account. The credential resolution lives in
+`src/banking/signInResolution.ts` (`resolveSignIn`), covered by
+`src/__tests__/signInResolution.test.ts`.
+
+Passwords are verified against the password stored on the client's profile
+record — the same record the desk edits (Client directory → Edit profile →
+password). Supabase Auth is accepted only for accounts with no stored password
+(legacy Auth-only users), because a desk reset never reaches Supabase Auth.
+Consequences for the desk:
+
+- After you reset a client's password, the old one stops working immediately —
+  including on devices that have not synced yet, and even if Supabase Auth still
+  accepts it.
+- If a client ever gets locked out, set a fresh password in their client file;
+  the record is authoritative, so no Supabase console access is needed.
+- Built-in demo personas keep their documented passwords; only client records
+  are desk-editable.
+
+
 ## Layout
 
 - **Sidebar** (desktop) / **“Go to” picker** (phones) — grouped sections:
